@@ -5,13 +5,17 @@ const path = require('path');
 
 const PORT = process.env.PORT || 8080;
 
+// 获取项目根目录
+const ROOT_DIR = process.cwd();
+
 const server = http.createServer((req, res) => {
   // 移除查询参数
   const urlPath = req.url.split('?')[0];
-  let filePath = path.join(__dirname, 'public', urlPath === '/' ? 'index.html' : urlPath);
+  let filePath = path.join(ROOT_DIR, 'public', urlPath === '/' ? 'index.html' : urlPath);
   
   console.log('请求路径:', req.url);
   console.log('文件路径:', filePath);
+  console.log('文件存在:', fs.existsSync(filePath));
   
   const extname = path.extname(filePath);
   let contentType = 'text/html';
