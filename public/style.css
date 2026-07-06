@@ -382,6 +382,19 @@ header {
   color: var(--text-secondary);
 }
 
+/* 页脚 */
+footer {
+  text-align: center;
+  padding: 20px 0;
+  margin-top: 20px;
+}
+
+.version {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 /* 响应式 */
 @media (max-width: 480px) {
   .app {

@@ -5,7 +5,6 @@ const path = require('path');
 
 const PORT = process.env.PORT || 8080;
 
-// 创建HTTP服务器
 const server = http.createServer((req, res) => {
   let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
   
@@ -34,11 +33,8 @@ const server = http.createServer((req, res) => {
 });
 
 const wss = new WebSocket.Server({ server });
-
-// 房间管理
 const rooms = new Map();
 
-// 生成5位共享码
 function generateShareCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
@@ -51,55 +47,32 @@ function generateShareCode() {
   return code;
 }
 
-// 安全发送消息
 function safeSend(ws, data) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify(data));
       return true;
-    } catch (e) {
-      console.error('发送消息失败:', e);
-    }
+    } catch (e) {}
   }
   return false;
 }
 
-// 清理断开的连接
-function cleanRoom(shareCode) {
-  const room = rooms.get(shareCode);
-  if (!room) return;
-  
-  // 清理断开的观看者
-  for (const [vid, ws] of room.viewers) {
-    if (ws.readyState !== WebSocket.OPEN) {
-      room.viewers.delete(vid);
-      console.log(`清理断开的观看者: ${vid}`);
-    }
-  }
-}
-
 wss.on('connection', (ws) => {
   let currentRoom = null;
-  let viewerId = null;
   let isSharer = false;
   let heartbeatTimer = null;
   
-  // 心跳检测
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
   
-  // 启动心跳
   heartbeatTimer = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.ping();
-    }
+    if (ws.readyState === WebSocket.OPEN) ws.ping();
   }, 25000);
   
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data);
       
-      // 心跳响应
       if (message.type === 'heartbeat') {
         safeSend(ws, { type: 'heartbeat-ack' });
         return;
@@ -110,14 +83,13 @@ wss.on('connection', (ws) => {
           const shareCode = generateShareCode();
           rooms.set(shareCode, {
             sharer: ws,
-            viewers: new Map(),
-            createdAt: Date.now()
+            sharerPeerId: message.peerId,
+            viewers: new Map()
           });
           currentRoom = shareCode;
           isSharer = true;
-          
           safeSend(ws, { type: 'room-created', shareCode });
-          console.log(`房间已创建: ${shareCode}`);
+          console.log(`房间已创建: ${shareCode}, PeerID: ${message.peerId}`);
           break;
           
         case 'join-room':
@@ -132,72 +104,26 @@ wss.on('connection', (ws) => {
             return;
           }
           
-          viewerId = Math.random().toString(36).substr(2, 9);
-          room.viewers.set(viewerId, ws);
+          const viewerId = Math.random().toString(36).substr(2, 9);
+          room.viewers.set(viewerId, { ws, peerId: message.peerId });
           currentRoom = message.shareCode;
           isSharer = false;
           
-          safeSend(ws, { type: 'joined-room', viewerId });
-          safeSend(room.sharer, { type: 'viewer-joined', viewerId });
+          // 通知观看者加入成功，并发送共享者的PeerID
+          safeSend(ws, {
+            type: 'joined-room',
+            viewerId,
+            peerId: room.sharerPeerId
+          });
+          
+          // 通知共享者有新观看者，发送观看者的PeerID
+          safeSend(room.sharer, {
+            type: 'viewer-joined',
+            viewerId,
+            peerId: message.peerId
+          });
+          
           console.log(`观看者 ${viewerId} 加入房间 ${message.shareCode}`);
-          break;
-          
-        case 'offer':
-          const offerRoom = rooms.get(message.shareCode);
-          if (offerRoom) {
-            const viewer = offerRoom.viewers.get(message.viewerId);
-            if (viewer) {
-              safeSend(viewer, {
-                type: 'offer',
-                offer: message.offer,
-                shareCode: message.shareCode
-              });
-            }
-          }
-          break;
-          
-        case 'answer':
-          const answerRoom = rooms.get(message.shareCode);
-          if (answerRoom) {
-            safeSend(answerRoom.sharer, {
-              type: 'answer',
-              answer: message.answer,
-              viewerId: message.viewerId
-            });
-          }
-          break;
-          
-        case 'ice-candidate':
-          const iceRoom = rooms.get(message.shareCode);
-          if (!iceRoom) return;
-          
-          if (isSharer && message.viewerId) {
-            const targetViewer = iceRoom.viewers.get(message.viewerId);
-            safeSend(targetViewer, {
-              type: 'ice-candidate',
-              candidate: message.candidate,
-              shareCode: message.shareCode
-            });
-          } else if (!isSharer) {
-            safeSend(iceRoom.sharer, {
-              type: 'ice-candidate',
-              candidate: message.candidate,
-              viewerId: viewerId
-            });
-          }
-          break;
-          
-        case 'reconnect-request':
-          // 观看者请求重新连接
-          if (!isSharer && currentRoom) {
-            const reRoom = rooms.get(currentRoom);
-            if (reRoom && reRoom.sharer.readyState === WebSocket.OPEN) {
-              safeSend(reRoom.sharer, {
-                type: 'viewer-reconnect',
-                viewerId: viewerId
-              });
-            }
-          }
           break;
       }
     } catch (e) {
@@ -212,16 +138,13 @@ wss.on('connection', (ws) => {
       const room = rooms.get(currentRoom);
       if (room) {
         if (isSharer) {
-          // 通知所有观看者
-          for (const [vid, viewerWs] of room.viewers) {
-            safeSend(viewerWs, { type: 'sharer-left' });
+          for (const [vid, viewer] of room.viewers) {
+            safeSend(viewer.ws, { type: 'sharer-left' });
           }
           rooms.delete(currentRoom);
           console.log(`房间 ${currentRoom} 已关闭`);
-        } else if (viewerId) {
-          room.viewers.delete(viewerId);
-          safeSend(room.sharer, { type: 'viewer-left', viewerId });
-          console.log(`观看者 ${viewerId} 离开房间 ${currentRoom}`);
+        } else {
+          room.viewers.delete(currentRoom);
         }
       }
     }
@@ -236,14 +159,11 @@ wss.on('connection', (ws) => {
 setInterval(() => {
   for (const [code, room] of rooms) {
     if (room.sharer.readyState !== WebSocket.OPEN) {
-      // 通知观看者
-      for (const [vid, viewerWs] of room.viewers) {
-        safeSend(viewerWs, { type: 'sharer-left' });
+      for (const [vid, viewer] of room.viewers) {
+        safeSend(viewer.ws, { type: 'sharer-left' });
       }
       rooms.delete(code);
       console.log(`清理无效房间: ${code}`);
-    } else {
-      cleanRoom(code);
     }
   }
 }, 30000);

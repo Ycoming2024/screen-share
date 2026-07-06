@@ -1,31 +1,5 @@
-// WebRTC配置
-const rtcConfig = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun.miwifi.com:3478' },
-    { urls: 'stun:stun.qq.com:3478' },
-    // 公共TURN服务器（免费但不太稳定）
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ],
-  iceCandidatePoolSize: 10,
-  iceTransportPolicy: 'all'
-};
+// 版本号
+const APP_VERSION = '1.2.0';
 
 // DOM元素
 const startShareBtn = document.getElementById('start-share-btn');
@@ -44,35 +18,21 @@ const pipBtn = document.getElementById('pip-btn');
 
 // 状态变量
 let ws = null;
+let peer = null;
 let localStream = null;
-let peerConnections = new Map();
+let currentCall = null;
 let isSharer = false;
 let currentShareCode = null;
-let viewerId = null;
 let heartbeatTimer = null;
-let reconnectTimer = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
 
 // WebSocket连接
 function connectWebSocket() {
-  if (ws && ws.readyState === WebSocket.OPEN) return;
-  
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${protocol}//${window.location.host}`);
   
   ws.onopen = () => {
-    console.log('已连接到服务器');
-    reconnectAttempts = 0;
+    console.log('WebSocket已连接');
     startHeartbeat();
-    
-    // 如果之前有共享码，尝试重连
-    if (currentShareCode && !isSharer && viewerId) {
-      ws.send(JSON.stringify({
-        type: 'join-room',
-        shareCode: currentShareCode
-      }));
-    }
   };
   
   ws.onmessage = (event) => {
@@ -85,16 +45,9 @@ function connectWebSocket() {
   };
   
   ws.onclose = () => {
-    console.log('与服务器断开连接');
+    console.log('WebSocket断开');
     stopHeartbeat();
-    
-    if (isSharer) {
-      showStatus('sharer-status', '连接断开，正在重连...', 'error');
-    } else if (currentShareCode) {
-      showStatus('viewer-status', '连接断开，正在重连...', 'error');
-    }
-    
-    attemptReconnect();
+    setTimeout(connectWebSocket, 3000);
   };
   
   ws.onerror = (error) => {
@@ -102,7 +55,7 @@ function connectWebSocket() {
   };
 }
 
-// 心跳机制
+// 心跳
 function startHeartbeat() {
   stopHeartbeat();
   heartbeatTimer = setInterval(() => {
@@ -119,23 +72,58 @@ function stopHeartbeat() {
   }
 }
 
-// 重连逻辑
-function attemptReconnect() {
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    showStatus('sharer-status', '重连失败，请刷新页面', 'error');
-    showStatus('viewer-status', '重连失败，请刷新页面', 'error');
-    return;
-  }
+// 初始化PeerJS
+function initPeer() {
+  peer = new Peer({
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun.miwifi.com:3478' },
+        { urls: 'stun:stun.qq.com:3478' },
+        // PeerJS 自带的 TURN 服务器会自动添加
+      ]
+    }
+  });
   
-  reconnectAttempts++;
-  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
+  peer.on('open', (id) => {
+    console.log('PeerJS ID:', id);
+  });
   
-  console.log(`尝试重连 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+  peer.on('call', (call) => {
+    console.log('收到呼叫');
+    if (localStream) {
+      call.answer(localStream);
+      handleCall(call);
+    }
+  });
   
-  clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => {
-    connectWebSocket();
-  }, delay);
+  peer.on('error', (err) => {
+    console.error('PeerJS错误:', err);
+  });
+}
+
+// 处理呼叫
+function handleCall(call) {
+  currentCall = call;
+  
+  call.on('stream', (remoteStream) => {
+    console.log('收到远程流');
+    remoteVideo.srcObject = remoteStream;
+    videoContainer.classList.remove('hidden');
+    videoStatus.textContent = '正在观看共享屏幕';
+  });
+  
+  call.on('close', () => {
+    console.log('呼叫关闭');
+    videoStatus.textContent = '连接已关闭';
+  });
+  
+  call.on('error', (err) => {
+    console.error('呼叫错误:', err);
+    videoStatus.textContent = '连接错误';
+  });
 }
 
 // 处理消息
@@ -153,41 +141,33 @@ function handleMessage(message) {
       break;
       
     case 'viewer-joined':
-      handleViewerJoined(message.viewerId);
-      break;
-      
-    case 'viewer-left':
-      handleViewerLeft(message.viewerId);
-      break;
-      
-    case 'viewer-reconnect':
-      // 观看者重连，重新发送offer
-      handleViewerJoined(message.viewerId);
+      handleViewerJoined(message.peerId);
       break;
       
     case 'joined-room':
-      viewerId = message.viewerId;
       showStatus('viewer-status', '已加入房间，正在连接...', 'info');
+      // 观看者呼叫共享者
+      if (message.peerId && localStream) {
+        const call = peer.call(message.peerId, localStream);
+        handleCall(call);
+      }
       break;
       
-    case 'offer':
-      handleOffer(message.offer, message.shareCode);
-      break;
-      
-    case 'answer':
-      handleAnswer(message.answer, message.viewerId);
-      break;
-      
-    case 'ice-candidate':
-      handleIceCandidate(message.candidate, message.viewerId || message.shareCode);
+    case 'sharer-peer-id':
+      // 观看者收到共享者的PeerID，发起呼叫
+      if (peer && localStream) {
+        const call = peer.call(message.peerId, localStream);
+        handleCall(call);
+      }
       break;
       
     case 'sharer-left':
       showStatus('viewer-status', '共享者已停止共享', 'error');
-      closeAllPeerConnections();
       videoContainer.classList.add('hidden');
-      currentShareCode = null;
-      viewerId = null;
+      if (currentCall) {
+        currentCall.close();
+        currentCall = null;
+      }
       break;
       
     case 'error':
@@ -197,182 +177,15 @@ function handleMessage(message) {
 }
 
 // 共享者：处理观看者加入
-async function handleViewerJoined(newViewerId) {
-  console.log('观看者加入:', newViewerId);
+function handleViewerJoined(viewerPeerId) {
+  console.log('观看者加入:', viewerPeerId);
   
-  try {
-    // 如果已有连接，先关闭
-    if (peerConnections.has(newViewerId)) {
-      peerConnections.get(newViewerId).close();
-    }
-    
-    const pc = createPeerConnection(newViewerId);
-    peerConnections.set(newViewerId, pc);
-    
-    // 添加本地流
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
-    }
-    
-    // 创建offer
-    const offer = await pc.createOffer({
-      offerToReceiveAudio: true,
-      offerToReceiveVideo: true
-    });
-    await pc.setLocalDescription(offer);
-    
-    // 发送offer
-    ws.send(JSON.stringify({
-      type: 'offer',
-      offer: offer,
-      viewerId: newViewerId,
-      shareCode: currentShareCode
-    }));
-    
-    updateViewerCount();
-  } catch (error) {
-    console.error('处理观看者加入错误:', error);
-  }
-}
-
-// 处理观看者离开
-function handleViewerLeft(leavingViewerId) {
-  console.log('观看者离开:', leavingViewerId);
-  
-  const pc = peerConnections.get(leavingViewerId);
-  if (pc) {
-    pc.close();
-    peerConnections.delete(leavingViewerId);
+  if (peer && localStream && viewerPeerId) {
+    const call = peer.call(viewerPeerId, localStream);
+    handleCall(call);
   }
   
   updateViewerCount();
-}
-
-// 创建PeerConnection
-function createPeerConnection(peerId) {
-  const pc = new RTCPeerConnection(rtcConfig);
-  
-  // ICE候选处理
-  pc.onicecandidate = (event) => {
-    if (event.candidate && ws.readyState === WebSocket.OPEN) {
-      console.log('发送ICE候选:', event.candidate.type);
-      ws.send(JSON.stringify({
-        type: 'ice-candidate',
-        candidate: event.candidate,
-        viewerId: isSharer ? peerId : currentShareCode,
-        shareCode: currentShareCode
-      }));
-    } else if (!event.candidate) {
-      console.log('ICE候选收集完成');
-    }
-  };
-  
-  // ICE收集状态
-  pc.onicegatheringstatechange = () => {
-    console.log('ICE收集状态:', pc.iceGatheringState);
-  };
-  
-  if (!isSharer) {
-    pc.ontrack = (event) => {
-      console.log('收到远程流');
-      if (event.streams && event.streams[0]) {
-        remoteVideo.srcObject = event.streams[0];
-        videoContainer.classList.remove('hidden');
-        videoStatus.textContent = '正在观看共享屏幕';
-      }
-    };
-  }
-  
-  // 连接状态监控
-  pc.onconnectionstatechange = () => {
-    console.log('连接状态:', pc.connectionState);
-    
-    switch (pc.connectionState) {
-      case 'connected':
-        if (!isSharer) {
-          videoStatus.textContent = '正在观看共享屏幕';
-        }
-        break;
-      case 'disconnected':
-        if (!isSharer) {
-          videoStatus.textContent = '连接中断，尝试恢复中...';
-          // 尝试恢复
-          setTimeout(() => {
-            if (pc.connectionState === 'disconnected') {
-              pc.restartIce();
-            }
-          }, 2000);
-        }
-        break;
-      case 'failed':
-        if (!isSharer) {
-          videoStatus.textContent = '连接失败，请刷新重试';
-        }
-        // 关闭失败的连接
-        pc.close();
-        peerConnections.delete(peerId);
-        updateViewerCount();
-        break;
-    }
-  };
-  
-  pc.oniceconnectionstatechange = () => {
-    console.log('ICE状态:', pc.iceConnectionState);
-    
-    if (pc.iceConnectionState === 'failed') {
-      pc.restartIce();
-    }
-  };
-  
-  return pc;
-}
-
-// 处理offer
-async function handleOffer(offer, shareCode) {
-  try {
-    const pc = createPeerConnection(shareCode);
-    peerConnections.set(shareCode, pc);
-    
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    
-    ws.send(JSON.stringify({
-      type: 'answer',
-      answer: answer,
-      viewerId: viewerId,
-      shareCode: shareCode
-    }));
-  } catch (error) {
-    console.error('处理offer错误:', error);
-  }
-}
-
-// 处理answer
-async function handleAnswer(answer, fromViewerId) {
-  try {
-    const pc = peerConnections.get(fromViewerId);
-    if (pc && pc.signalingState === 'have-local-offer') {
-      await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-  } catch (error) {
-    console.error('处理answer错误:', error);
-  }
-}
-
-// 处理ICE候选
-async function handleIceCandidate(candidate, peerId) {
-  try {
-    const pc = peerConnections.get(peerId);
-    if (pc && pc.remoteDescription) {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
-    }
-  } catch (error) {
-    console.error('处理ICE候选错误:', error);
-  }
 }
 
 // 开始共享
@@ -382,23 +195,25 @@ async function startShare() {
       video: {
         cursor: 'always',
         width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        frameRate: { ideal: 30 }
+        height: { ideal: 1080 }
       },
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
+      audio: true
     });
     
-    // 监听轨道结束（用户停止共享）
     localStream.getVideoTracks()[0].onended = () => {
       stopShare();
     };
     
     isSharer = true;
-    ws.send(JSON.stringify({ type: 'create-room' }));
+    initPeer();
+    
+    peer.on('open', (id) => {
+      console.log('共享者PeerID:', id);
+      ws.send(JSON.stringify({
+        type: 'create-room',
+        peerId: id
+      }));
+    });
     
   } catch (error) {
     console.error('获取屏幕流错误:', error);
@@ -413,7 +228,15 @@ function stopShare() {
     localStream = null;
   }
   
-  closeAllPeerConnections();
+  if (currentCall) {
+    currentCall.close();
+    currentCall = null;
+  }
+  
+  if (peer) {
+    peer.destroy();
+    peer = null;
+  }
   
   isSharer = false;
   currentShareCode = null;
@@ -422,13 +245,12 @@ function stopShare() {
   startShareBtn.classList.remove('hidden');
   sharerStatus.textContent = '';
   
-  // 移除观看者数量显示
   const countDisplay = document.getElementById('viewer-count');
   if (countDisplay) countDisplay.remove();
 }
 
 // 加入共享
-function joinShare() {
+async function joinShare() {
   const code = shareCodeInput.value.trim().toUpperCase();
   
   if (code.length !== 5) {
@@ -436,21 +258,46 @@ function joinShare() {
     return;
   }
   
-  currentShareCode = code;
-  isSharer = false;
+  try {
+    localStream = await navigator.mediaDevices.getDisplayMedia({
+      video: false,
+      audio: true
+    }).catch(() => null);
+    
+    // 如果没有获取到音频流，创建空流
+    if (!localStream) {
+      const ctx = new AudioContext();
+      const oscillator = ctx.createOscillator();
+      const dst = oscillator.connect(ctx.createMediaStreamDestination());
+      oscillator.start();
+      localStream = dst.stream;
+    }
+  } catch (e) {
+    console.log('无音频流');
+  }
   
-  ws.send(JSON.stringify({
-    type: 'join-room',
-    shareCode: code
-  }));
+  initPeer();
+  
+  peer.on('open', (id) => {
+    console.log('观看者PeerID:', id);
+    ws.send(JSON.stringify({
+      type: 'join-room',
+      shareCode: code,
+      peerId: id
+    }));
+  });
 }
 
-// 关闭所有PeerConnection
-function closeAllPeerConnections() {
-  peerConnections.forEach(pc => {
-    try { pc.close(); } catch (e) {}
-  });
-  peerConnections.clear();
+// 更新观看者数量
+function updateViewerCount() {
+  let countDisplay = document.getElementById('viewer-count');
+  if (!countDisplay) {
+    countDisplay = document.createElement('span');
+    countDisplay.id = 'viewer-count';
+    countDisplay.className = 'viewer-count';
+    sharerStatus.parentNode.insertBefore(countDisplay, sharerStatus.nextSibling);
+  }
+  countDisplay.textContent = '有观看者已连接';
 }
 
 // 显示状态
@@ -459,24 +306,6 @@ function showStatus(elementId, message, type) {
   if (element) {
     element.textContent = message;
     element.className = `status ${type}`;
-  }
-}
-
-// 更新观看者数量
-function updateViewerCount() {
-  const count = peerConnections.size;
-  let countDisplay = document.getElementById('viewer-count');
-  
-  if (count > 0) {
-    if (!countDisplay) {
-      countDisplay = document.createElement('span');
-      countDisplay.id = 'viewer-count';
-      countDisplay.className = 'viewer-count';
-      sharerStatus.parentNode.insertBefore(countDisplay, sharerStatus.nextSibling);
-    }
-    countDisplay.textContent = `${count} 人正在观看`;
-  } else if (countDisplay) {
-    countDisplay.remove();
   }
 }
 
@@ -550,84 +379,12 @@ shareCodeInput.addEventListener('input', (e) => {
 
 // 页面关闭时清理
 window.addEventListener('beforeunload', () => {
-  closeAllPeerConnections();
+  if (currentCall) currentCall.close();
+  if (peer) peer.destroy();
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
   }
 });
-
-// 诊断功能
-async function runDiagnosis() {
-  const resultDiv = document.getElementById('diagnosis-result');
-  resultDiv.classList.remove('hidden');
-  resultDiv.innerHTML = '<p>正在诊断...</p>';
-  
-  const results = [];
-  
-  // 1. 检查WebSocket连接
-  results.push(`<strong>1. WebSocket连接:</strong> ${ws.readyState === WebSocket.OPEN ? '✅ 已连接' : '❌ 未连接'}`);
-  
-  // 2. 检查WebRTC支持
-  const rtcSupported = !!(window.RTCPeerConnection && navigator.mediaDevices);
-  results.push(`<strong>2. WebRTC支持:</strong> ${rtcSupported ? '✅ 支持' : '❌ 不支持'}`);
-  
-  // 3. 检查屏幕共享支持
-  const screenSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
-  results.push(`<strong>3. 屏幕共享支持:</strong> ${screenSupported ? '✅ 支持' : '❌ 不支持'}`);
-  
-  // 4. 测试ICE服务器
-  try {
-    const pc = new RTCPeerConnection(rtcConfig);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    
-    // 等待ICE候选收集
-    await new Promise((resolve) => {
-      const candidates = [];
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          candidates.push(e.candidate);
-        } else {
-          resolve(candidates);
-        }
-      };
-      setTimeout(() => resolve(candidates), 5000);
-    });
-    
-    const iceState = pc.iceConnectionState;
-    results.push(`<strong>4. ICE服务器:</strong> ${iceState === 'failed' ? '❌ 连接失败' : '✅ 可用'}`);
-    
-    // 检查是否有relay候选（TURN服务器）
-    const hasRelay = pc.localDescription.sdp.includes('typ relay');
-    results.push(`<strong>5. TURN中继:</strong> ${hasRelay ? '✅ 可用' : '⚠️ 不可用（可能无法穿透NAT）'}`);
-    
-    pc.close();
-  } catch (error) {
-    results.push(`<strong>4. ICE服务器:</strong> ❌ 错误: ${error.message}`);
-  }
-  
-  // 6. 网络信息
-  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-  if (connection) {
-    results.push(`<strong>6. 网络类型:</strong> ${connection.effectiveType || '未知'}`);
-  }
-  
-  // 显示结果
-  resultDiv.innerHTML = results.join('<br>');
-  
-  // 添加建议
-  let suggestions = '<br><strong>建议:</strong><br>';
-  if (!rtcSupported) {
-    suggestions += '- 请使用最新版 Chrome/Edge/Firefox 浏览器<br>';
-  }
-  if (ws.readyState !== WebSocket.OPEN) {
-    suggestions += '- 请检查服务器是否正常运行<br>';
-  }
-  suggestions += '- 如果跨网络连接失败，可能需要配置 TURN 服务器<br>';
-  suggestions += '- 确保防火墙允许 WebRTC 通信（UDP端口）<br>';
-  
-  resultDiv.innerHTML += suggestions;
-}
 
 // 初始化
 connectWebSocket();

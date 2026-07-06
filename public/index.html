@@ -101,28 +101,14 @@
         </div>
         <div id="video-status"></div>
       </div>
-
-      <!-- 诊断信息 -->
-      <div class="card" style="margin-top: 20px;">
-        <div class="card-header">
-          <h2>连接诊断</h2>
-          <p class="card-desc">如果连接失败，点击查看诊断信息</p>
-        </div>
-        <div class="card-body">
-          <button id="diagnose-btn" class="btn btn-secondary" onclick="runDiagnosis()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M12 16v-4"></path>
-              <path d="M12 8h.01"></path>
-            </svg>
-            运行诊断
-          </button>
-          <div id="diagnosis-result" class="diagnosis-result hidden"></div>
-        </div>
-      </div>
     </main>
+    
+    <footer>
+      <span class="version">v1.2.0</span>
+    </footer>
   </div>
   
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
