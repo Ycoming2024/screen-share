@@ -79,10 +79,18 @@ function initPeer() {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun.miwifi.com:3478' },
-        { urls: 'stun:stun.qq.com:3478' },
-        // PeerJS 自带的 TURN 服务器会自动添加
+        // 自建TURN服务器
+        {
+          urls: 'turn:172.245.47.251:3478',
+          username: 'turnuser',
+          credential: 'r20X6AncpXA4p3f7SL'
+        },
+        {
+          urls: 'turn:172.245.47.251:3478?transport=tcp',
+          username: 'turnuser',
+          credential: 'r20X6AncpXA4p3f7SL'
+        }
       ]
     }
   });
