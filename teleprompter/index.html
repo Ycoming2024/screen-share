@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>提词器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      background: transparent;
+      color: #ffffff;
+      overflow: hidden;
+      user-select: none;
+    }
+    
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(30, 30, 30, 0.95);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      -webkit-app-region: drag;
+      cursor: move;
+      position: relative;
+      z-index: 200;
+    }
+    
+    .toolbar button, .toolbar input, .toolbar select {
+      -webkit-app-region: no-drag;
+    }
+    
+    .toolbar-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      margin-right: 8px;
+    }
+    
+    .btn {
+      padding: 4px 8px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+    
+    .btn.active {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+    
+    .btn-icon {
+      padding: 4px 6px;
+      font-size: 12px;
+    }
+    
+    .mode-tabs {
+      display: flex;
+      gap: 2px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+      padding: 2px;
+    }
+    
+    .mode-tab {
+      padding: 3px 10px;
+      border: none;
+      border-radius: 3px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .mode-tab.active {
+      background: #2563eb;
+      color: #fff;
+    }
+    
+    .mode-tab:hover:not(.active) {
+      color: #fff;
+    }
+    
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    .control-label {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+    
+    .control-input {
+      width: 40px;
+      padding: 2px 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      color: #fff;
+      font-size: 11px;
+      text-align: center;
+    }
+    
+    .control-input:focus {
+      outline: none;
+      border-color: #2563eb;
+    }
+    
+    .separator {
+      width: 1px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.15);
+    }
+    
+    /* 提词器模式 */
+    .teleprompter-mode {
+      height: calc(100vh - 36px);
+      overflow: hidden;
+      position: relative;
+      background: transparent;
+    }
+    
+    .text-container {
+      position: absolute;
+      width: 100%;
+      transition: transform 0.1s linear;
+    }
+    
+    .text-content {
+      padding: 15px 30px;
+      font-size: 24px;
+      line-height: 1.6;
+      text-align: left;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #fff;
+      text-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    }
+    
+    .highlight-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: #2563eb;
+      box-shadow: 0 0 8px rgba(37, 99, 235, 0.5);
+      opacity: 0.8;
+    }
+    
+    /* 网页模式 */
+    .web-mode {
+      display: none;
+      height: calc(100vh - 36px);
+      position: relative;
+      flex-direction: column;
+    }
+    
+    .web-mode.active {
+      display: flex;
+    }
+    
+    .web-url-bar {
+      display: flex;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(30, 30, 30, 0.9);
+      flex-shrink: 0;
+    }
+    
+    .web-url-input {
+      flex: 1;
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+    }
+    
+    .web-url-input:focus {
+      border-color: #2563eb;
+    }
+    
+    .web-content {
+      flex: 1;
+      width: 100%;
+      border: none;
+      background: #fff;
+    }
+    
+    /* 设置面板 */
+    .settings-panel {
+      display: none;
+      position: fixed;
+      top: 36px;
+      right: 10px;
+      width: 240px;
+      background: rgba(30, 30, 30, 0.98);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 12px;
+      z-index: 300;
+    }
+    
+    .settings-panel.show {
+      display: block;
+    }
+    
+    .settings-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    
+    .settings-row label {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .settings-row input[type="range"] {
+      width: 100px;
+    }
+    
+    .settings-row input[type="number"] {
+      width: 50px;
+      padding: 3px 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      color: #fff;
+      font-size: 11px;
+      text-align: center;
+    }
+    
+    .settings-row select {
+      padding: 3px 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      color: #fff;
+      font-size: 11px;
+    }
+    
+    /* 编辑器 */
+    .editor-panel {
+      display: none;
+      position: fixed;
+      top: 36px;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      background: rgba(30, 30, 30, 0.98);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 12px;
+      z-index: 300;
+    }
+    
+    .editor-panel.show {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .editor-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    
+    .editor-title {
+      font-size: 12px;
+      font-weight: 600;
+    }
+    
+    .editor-actions {
+      display: flex;
+      gap: 6px;
+    }
+    
+    .editor-textarea {
+      flex: 1;
+      width: 100%;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 14px;
+      line-height: 1.5;
+      resize: none;
+      outline: none;
+      font-family: inherit;
+    }
+    
+    .editor-textarea:focus {
+      border-color: #2563eb;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="toolbar-title">提词器</span>
+    
+    <div class="mode-tabs">
+      <button class="mode-tab active" onclick="switchMode('teleprompter')">提词</button>
+      <button class="mode-tab" onclick="switchMode('web')">网页</button>
+    </div>
+    
+    <div class="separator"></div>
+    
+    <div class="control-group" id="teleprompter-controls">
+      <button class="btn" id="btn-play" onclick="togglePlay()">▶</button>
+      <button class="btn" onclick="resetScroll()">↺</button>
+      <input type="number" class="control-input" id="speed-input" value="3" min="1" max="20" onchange="updateSpeed()" title="滚动速度">
+    </div>
+    
+    <button class="btn" id="btn-edit" onclick="toggleEditor()">编辑</button>
+    <button class="btn" onclick="toggleSettings()">⚙</button>
+    <button class="btn btn-icon" onclick="closeApp()">✕</button>
+  </div>
+  
+  <!-- 提词器模式 -->
+  <div class="teleprompter-mode" id="teleprompter-mode">
+    <div class="highlight-line" id="highlight-line"></div>
+    <div class="text-container" id="text-container">
+      <div class="text-content" id="text-content">在此输入提词内容
+点击"编辑"按钮修改
+支持多行自动滚动</div>
+    </div>
+  </div>
+  
+  <!-- 网页模式 -->
+  <div class="web-mode" id="web-mode">
+    <div class="web-url-bar">
+      <input type="text" class="web-url-input" id="web-url-input" placeholder="输入网址，如 https://docs.qq.com" value="">
+      <button class="btn" onclick="loadUrl()">打开</button>
+      <button class="btn" onclick="loadQuickUrl('https://docs.qq.com')">腾讯文档</button>
+      <button class="btn" onclick="loadQuickUrl('https://kdocs.cn')">金山文档</button>
+    </div>
+    <webview id="web-content" class="web-content" src="about:blank" partition="persist:web"></webview>
+  </div>
+  
+  <!-- 设置面板 -->
+  <div class="settings-panel" id="settings-panel">
+    <div class="settings-title">显示设置</div>
+    
+    <div class="settings-row">
+      <label>字体大小</label>
+      <input type="number" value="24" min="14" max="60" onchange="updateFontSize(this.value)">
+    </div>
+    
+    <div class="settings-row">
+      <label>窗口高度</label>
+      <input type="number" value="300" min="100" max="600" step="10" onchange="updateHeight(this.value)">
+    </div>
+    
+    <div class="settings-row">
+      <label>窗口宽度 %</label>
+      <input type="number" value="100" min="30" max="100" step="5" onchange="updateWidth(this.value)">
+    </div>
+    
+    <div class="settings-row">
+      <label>窗口位置</label>
+      <select onchange="updatePosition(this.value)">
+        <option value="0">顶部</option>
+        <option value="center">居中</option>
+        <option value="bottom">底部</option>
+      </select>
+    </div>
+    
+    <div class="settings-row">
+      <label>鼠标穿透</label>
+      <input type="checkbox" id="click-through" onchange="toggleClickThrough(this.checked)">
+    </div>
+  </div>
+  
+  <!-- 编辑器面板 -->
+  <div class="editor-panel" id="editor-panel">
+    <div class="editor-header">
+      <span class="editor-title">编辑提词内容</span>
+      <div class="editor-actions">
+        <button class="btn" onclick="saveText()">保存</button>
+        <button class="btn" onclick="toggleEditor()">取消</button>
+      </div>
+    </div>
+    <textarea class="editor-textarea" id="editor-textarea"></textarea>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    let currentMode = 'teleprompter';
+    let isPlaying = false;
+    let scrollPosition = 0;
+    let speed = 3;
+    let animationId = null;
+    
+    const textContainer = document.getElementById('text-container');
+    const textContent = document.getElementById('text-content');
+    const teleprompterMode = document.getElementById('teleprompter-mode');
+    const webMode = document.getElementById('web-mode');
+    const highlightLine = document.getElementById('highlight-line');
+    const speedInput = document.getElementById('speed-input');
+    const webContent = document.getElementById('web-content');
+    
+    // 切换模式
+    function switchMode(mode) {
+      currentMode = mode;
+      
+      document.querySelectorAll('.mode-tab').forEach(tab => tab.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      if (mode === 'teleprompter') {
+        teleprompterMode.style.display = 'block';
+        webMode.classList.remove('active');
+        document.getElementById('teleprompter-controls').style.display = 'flex';
+        document.getElementById('btn-edit').style.display = 'inline-block';
+      } else {
+        teleprompterMode.style.display = 'none';
+        webMode.classList.add('active');
+        document.getElementById('teleprompter-controls').style.display = 'none';
+        document.getElementById('btn-edit').style.display = 'none';
+        if (isPlaying) togglePlay();
+      }
+    }
+    
+    // 加载网页
+    function loadUrl() {
+      let url = document.getElementById('web-url-input').value.trim();
+      if (!url) return;
+      
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+      }
+      
+      webContent.src = url;
+    }
+    
+    function loadQuickUrl(url) {
+      document.getElementById('web-url-input').value = url;
+      webContent.src = url;
+    }
+    
+    // 回车加载
+    document.getElementById('web-url-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') loadUrl();
+    });
+    
+    // 设置高亮线
+    function updateHighlightLine() {
+      const areaHeight = teleprompterMode.offsetHeight;
+      highlightLine.style.top = (areaHeight * 0.35) + 'px';
+    }
+    
+    // 滚动动画
+    function animate() {
+      if (!isPlaying) return;
+      
+      scrollPosition += speed * 0.3;
+      const containerHeight = textContainer.offsetHeight;
+      const areaHeight = teleprompterMode.offsetHeight;
+      
+      if (scrollPosition > containerHeight) {
+        scrollPosition = -areaHeight;
+      }
+      
+      textContainer.style.transform = `translateY(-${scrollPosition}px)`;
+      animationId = requestAnimationFrame(animate);
+    }
+    
+    function togglePlay() {
+      isPlaying = !isPlaying;
+      const btn = document.getElementById('btn-play');
+      btn.textContent = isPlaying ? '⏸' : '▶';
+      btn.classList.toggle('active', isPlaying);
+      
+      if (isPlaying) {
+        animate();
+      } else if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+    }
+    
+    function resetScroll() {
+      scrollPosition = 0;
+      textContainer.style.transform = 'translateY(0)';
+      if (isPlaying) togglePlay();
+    }
+    
+    function updateSpeed() {
+      speed = parseInt(speedInput.value) || 3;
+    }
+    
+    function updateFontSize(size) {
+      textContent.style.fontSize = size + 'px';
+    }
+    
+    function updateHeight(height) {
+      ipcRenderer.send('set-height', height);
+      setTimeout(updateHighlightLine, 100);
+    }
+    
+    function updateWidth(percent) {
+      const screenWidth = window.screen.width;
+      const pixelWidth = Math.floor(screenWidth * parseInt(percent) / 100);
+      ipcRenderer.send('set-width', pixelWidth);
+    }
+    
+    function updatePosition(position) {
+      const screenHeight = window.screen.height;
+      const windowHeight = window.outerHeight;
+      
+      let y;
+      switch(position) {
+        case '0': y = 0; break;
+        case 'center': y = Math.floor((screenHeight - windowHeight) / 2); break;
+        case 'bottom': y = screenHeight - windowHeight; break;
+      }
+      ipcRenderer.send('set-y', y);
+    }
+    
+    let clickThroughEnabled = false;
+    
+    function toggleClickThrough(enabled) {
+      clickThroughEnabled = enabled;
+      ipcRenderer.send('set-click-through', enabled);
+      document.getElementById('click-through').checked = enabled;
+    }
+    
+    // 鼠标进入/离开窗口时自动切换穿透
+    document.addEventListener('mouseenter', () => {
+      if (clickThroughEnabled) {
+        ipcRenderer.send('set-click-through', false);
+      }
+    });
+    
+    document.addEventListener('mouseleave', () => {
+      if (clickThroughEnabled) {
+        ipcRenderer.send('set-click-through', true);
+      }
+    });
+    
+    function toggleSettings() {
+      document.getElementById('settings-panel').classList.toggle('show');
+    }
+    
+    function toggleEditor() {
+      const panel = document.getElementById('editor-panel');
+      if (!panel.classList.contains('show')) {
+        document.getElementById('editor-textarea').value = textContent.textContent.trim();
+      }
+      panel.classList.toggle('show');
+    }
+    
+    function saveText() {
+      const text = document.getElementById('editor-textarea').value;
+      textContent.textContent = text || '请输入提词内容';
+      toggleEditor();
+      resetScroll();
+    }
+    
+    function closeApp() {
+      window.close();
+    }
+    
+    // 初始化
+    updateHighlightLine();
+    window.addEventListener('resize', updateHighlightLine);
+    
+    // 快捷键
+    document.addEventListener('keydown', (e) => {
+      if (e.key === ' ' && currentMode === 'teleprompter' && 
+          !document.getElementById('editor-panel').classList.contains('show')) {
+        e.preventDefault();
+        togglePlay();
+      }
+      if (e.key === 'Escape') {
+        document.getElementById('settings-panel').classList.remove('show');
+        document.getElementById('editor-panel').classList.remove('show');
+      }
+    });
+  </script>
+</body>
+</html>

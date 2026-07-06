@@ -1,9 +1,13 @@
-// WebRTC配置
+// WebRTC配置 - 添加更多STUN服务器
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ]
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.miwifi.com:3478' },
+    { urls: 'stun:stun.qq.com:3478' }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 // DOM元素
@@ -24,41 +28,105 @@ const pipBtn = document.getElementById('pip-btn');
 // 状态变量
 let ws = null;
 let localStream = null;
-let peerConnections = new Map(); // Map<viewerId, RTCPeerConnection>
+let peerConnections = new Map();
 let isSharer = false;
 let currentShareCode = null;
 let viewerId = null;
+let heartbeatTimer = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
-// 连接WebSocket服务器
+// WebSocket连接
 function connectWebSocket() {
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+  
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${protocol}//${window.location.host}`);
   
   ws.onopen = () => {
     console.log('已连接到服务器');
+    reconnectAttempts = 0;
+    startHeartbeat();
+    
+    // 如果之前有共享码，尝试重连
+    if (currentShareCode && !isSharer && viewerId) {
+      ws.send(JSON.stringify({
+        type: 'join-room',
+        shareCode: currentShareCode
+      }));
+    }
   };
   
   ws.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    handleMessage(message);
+    try {
+      const message = JSON.parse(event.data);
+      handleMessage(message);
+    } catch (e) {
+      console.error('解析消息错误:', e);
+    }
   };
   
   ws.onclose = () => {
     console.log('与服务器断开连接');
-    showStatus('sharer-status', '与服务器断开连接', 'error');
-    showStatus('viewer-status', '与服务器断开连接', 'error');
+    stopHeartbeat();
+    
+    if (isSharer) {
+      showStatus('sharer-status', '连接断开，正在重连...', 'error');
+    } else if (currentShareCode) {
+      showStatus('viewer-status', '连接断开，正在重连...', 'error');
+    }
+    
+    attemptReconnect();
   };
   
   ws.onerror = (error) => {
     console.error('WebSocket错误:', error);
-    showStatus('sharer-status', '连接错误', 'error');
-    showStatus('viewer-status', '连接错误', 'error');
   };
 }
 
-// 处理接收到的消息
+// 心跳机制
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'heartbeat' }));
+    }
+  }, 20000);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+// 重连逻辑
+function attemptReconnect() {
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    showStatus('sharer-status', '重连失败，请刷新页面', 'error');
+    showStatus('viewer-status', '重连失败，请刷新页面', 'error');
+    return;
+  }
+  
+  reconnectAttempts++;
+  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
+  
+  console.log(`尝试重连 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+  
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    connectWebSocket();
+  }, delay);
+}
+
+// 处理消息
 function handleMessage(message) {
   switch (message.type) {
+    case 'heartbeat-ack':
+      break;
+      
     case 'room-created':
       currentShareCode = message.shareCode;
       shareCodeDisplay.textContent = message.shareCode;
@@ -73,6 +141,11 @@ function handleMessage(message) {
       
     case 'viewer-left':
       handleViewerLeft(message.viewerId);
+      break;
+      
+    case 'viewer-reconnect':
+      // 观看者重连，重新发送offer
+      handleViewerJoined(message.viewerId);
       break;
       
     case 'joined-room':
@@ -94,8 +167,10 @@ function handleMessage(message) {
       
     case 'sharer-left':
       showStatus('viewer-status', '共享者已停止共享', 'error');
-      closePeerConnection();
+      closeAllPeerConnections();
       videoContainer.classList.add('hidden');
+      currentShareCode = null;
+      viewerId = null;
       break;
       
     case 'error':
@@ -104,23 +179,34 @@ function handleMessage(message) {
   }
 }
 
-// 共享者：处理新观看者加入
+// 共享者：处理观看者加入
 async function handleViewerJoined(newViewerId) {
   console.log('观看者加入:', newViewerId);
   
   try {
+    // 如果已有连接，先关闭
+    if (peerConnections.has(newViewerId)) {
+      peerConnections.get(newViewerId).close();
+    }
+    
     const pc = createPeerConnection(newViewerId);
     peerConnections.set(newViewerId, pc);
     
-    // 添加本地流到连接
-    localStream.getTracks().forEach(track => {
-      pc.addTrack(track, localStream);
-    });
+    // 添加本地流
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+    }
     
-    // 创建并发送offer
-    const offer = await pc.createOffer();
+    // 创建offer
+    const offer = await pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true
+    });
     await pc.setLocalDescription(offer);
     
+    // 发送offer
     ws.send(JSON.stringify({
       type: 'offer',
       offer: offer,
@@ -134,7 +220,7 @@ async function handleViewerJoined(newViewerId) {
   }
 }
 
-// 共享者：处理观看者离开
+// 处理观看者离开
 function handleViewerLeft(leavingViewerId) {
   console.log('观看者离开:', leavingViewerId);
   
@@ -152,7 +238,7 @@ function createPeerConnection(peerId) {
   const pc = new RTCPeerConnection(rtcConfig);
   
   pc.onicecandidate = (event) => {
-    if (event.candidate) {
+    if (event.candidate && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'ice-candidate',
         candidate: event.candidate,
@@ -165,25 +251,59 @@ function createPeerConnection(peerId) {
   if (!isSharer) {
     pc.ontrack = (event) => {
       console.log('收到远程流');
-      remoteVideo.srcObject = event.streams[0];
-      videoContainer.classList.remove('hidden');
-      videoStatus.textContent = '正在观看共享屏幕';
+      if (event.streams && event.streams[0]) {
+        remoteVideo.srcObject = event.streams[0];
+        videoContainer.classList.remove('hidden');
+        videoStatus.textContent = '正在观看共享屏幕';
+      }
     };
   }
   
+  // 连接状态监控
   pc.onconnectionstatechange = () => {
     console.log('连接状态:', pc.connectionState);
-    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-      if (!isSharer) {
-        videoStatus.textContent = '连接断开';
-      }
+    
+    switch (pc.connectionState) {
+      case 'connected':
+        if (!isSharer) {
+          videoStatus.textContent = '正在观看共享屏幕';
+        }
+        break;
+      case 'disconnected':
+        if (!isSharer) {
+          videoStatus.textContent = '连接中断，尝试恢复中...';
+          // 尝试恢复
+          setTimeout(() => {
+            if (pc.connectionState === 'disconnected') {
+              pc.restartIce();
+            }
+          }, 2000);
+        }
+        break;
+      case 'failed':
+        if (!isSharer) {
+          videoStatus.textContent = '连接失败，请刷新重试';
+        }
+        // 关闭失败的连接
+        pc.close();
+        peerConnections.delete(peerId);
+        updateViewerCount();
+        break;
+    }
+  };
+  
+  pc.oniceconnectionstatechange = () => {
+    console.log('ICE状态:', pc.iceConnectionState);
+    
+    if (pc.iceConnectionState === 'failed') {
+      pc.restartIce();
     }
   };
   
   return pc;
 }
 
-// 观看者：处理offer
+// 处理offer
 async function handleOffer(offer, shareCode) {
   try {
     const pc = createPeerConnection(shareCode);
@@ -205,11 +325,11 @@ async function handleOffer(offer, shareCode) {
   }
 }
 
-// 共享者：处理answer
+// 处理answer
 async function handleAnswer(answer, fromViewerId) {
   try {
     const pc = peerConnections.get(fromViewerId);
-    if (pc) {
+    if (pc && pc.signalingState === 'have-local-offer') {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
     }
   } catch (error) {
@@ -221,7 +341,7 @@ async function handleAnswer(answer, fromViewerId) {
 async function handleIceCandidate(candidate, peerId) {
   try {
     const pc = peerConnections.get(peerId);
-    if (pc) {
+    if (pc && pc.remoteDescription) {
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     }
   } catch (error) {
@@ -229,19 +349,24 @@ async function handleIceCandidate(candidate, peerId) {
   }
 }
 
-// 开始共享屏幕
+// 开始共享
 async function startShare() {
   try {
     localStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        cursor: 'always'
+        cursor: 'always',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30 }
       },
       audio: {
         echoCancellation: true,
-        noiseSuppression: true
+        noiseSuppression: true,
+        autoGainControl: true
       }
     });
     
+    // 监听轨道结束（用户停止共享）
     localStream.getVideoTracks()[0].onended = () => {
       stopShare();
     };
@@ -262,8 +387,7 @@ function stopShare() {
     localStream = null;
   }
   
-  peerConnections.forEach(pc => pc.close());
-  peerConnections.clear();
+  closeAllPeerConnections();
   
   isSharer = false;
   currentShareCode = null;
@@ -272,14 +396,13 @@ function stopShare() {
   startShareBtn.classList.remove('hidden');
   sharerStatus.textContent = '';
   
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.close();
-    connectWebSocket();
-  }
+  // 移除观看者数量显示
+  const countDisplay = document.getElementById('viewer-count');
+  if (countDisplay) countDisplay.remove();
 }
 
 // 加入共享
-async function joinShare() {
+function joinShare() {
   const code = shareCodeInput.value.trim().toUpperCase();
   
   if (code.length !== 5) {
@@ -296,43 +419,45 @@ async function joinShare() {
   }));
 }
 
-// 关闭PeerConnection
-function closePeerConnection() {
-  peerConnections.forEach(pc => pc.close());
+// 关闭所有PeerConnection
+function closeAllPeerConnections() {
+  peerConnections.forEach(pc => {
+    try { pc.close(); } catch (e) {}
+  });
   peerConnections.clear();
 }
 
-// 显示状态信息
+// 显示状态
 function showStatus(elementId, message, type) {
   const element = document.getElementById(elementId);
-  element.textContent = message;
-  element.className = `status ${type}`;
+  if (element) {
+    element.textContent = message;
+    element.className = `status ${type}`;
+  }
 }
 
-// 更新观看者数量显示
+// 更新观看者数量
 function updateViewerCount() {
   const count = peerConnections.size;
-  const countDisplay = document.getElementById('viewer-count');
+  let countDisplay = document.getElementById('viewer-count');
   
   if (count > 0) {
     if (!countDisplay) {
-      const span = document.createElement('span');
-      span.id = 'viewer-count';
-      span.className = 'viewer-count';
-      sharerStatus.parentNode.insertBefore(span, sharerStatus.nextSibling);
+      countDisplay = document.createElement('span');
+      countDisplay.id = 'viewer-count';
+      countDisplay.className = 'viewer-count';
+      sharerStatus.parentNode.insertBefore(countDisplay, sharerStatus.nextSibling);
     }
-    document.getElementById('viewer-count').textContent = `${count} 人正在观看`;
+    countDisplay.textContent = `${count} 人正在观看`;
   } else if (countDisplay) {
     countDisplay.remove();
   }
 }
 
-// 全屏功能
+// 全屏
 function toggleFullscreen() {
   if (!document.fullscreenElement) {
-    videoContainer.requestFullscreen().catch(err => {
-      console.error('全屏错误:', err);
-      // 降级：创建放大遮罩
+    videoContainer.requestFullscreen().catch(() => {
       createVideoOverlay();
     });
   } else {
@@ -340,12 +465,11 @@ function toggleFullscreen() {
   }
 }
 
-// 创建视频放大遮罩
+// 视频放大
 function createVideoOverlay() {
-  // 移除已存在的遮罩
-  const existingOverlay = document.querySelector('.video-overlay');
-  if (existingOverlay) {
-    existingOverlay.remove();
+  const existing = document.querySelector('.video-overlay');
+  if (existing) {
+    existing.remove();
     return;
   }
   
@@ -361,9 +485,7 @@ function createVideoOverlay() {
   closeBtn.onclick = () => overlay.remove();
   
   overlay.onclick = (e) => {
-    if (e.target === overlay) {
-      overlay.remove();
-    }
+    if (e.target === overlay) overlay.remove();
   };
   
   overlay.appendChild(video);
@@ -371,7 +493,7 @@ function createVideoOverlay() {
   document.body.appendChild(overlay);
 }
 
-// 画中画功能
+// 画中画
 async function togglePictureInPicture() {
   try {
     if (document.pictureInPictureElement) {
@@ -381,12 +503,8 @@ async function togglePictureInPicture() {
     }
   } catch (error) {
     console.error('画中画错误:', error);
-    showStatus('video-status', '画中画不可用', 'error');
   }
 }
-
-// 视频点击放大
-remoteVideo.addEventListener('click', createVideoOverlay);
 
 // 事件监听
 startShareBtn.addEventListener('click', startShare);
@@ -394,15 +512,22 @@ stopShareBtn.addEventListener('click', stopShare);
 joinBtn.addEventListener('click', joinShare);
 fullscreenBtn.addEventListener('click', toggleFullscreen);
 pipBtn.addEventListener('click', togglePictureInPicture);
+remoteVideo.addEventListener('click', createVideoOverlay);
 
 shareCodeInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
-    joinShare();
-  }
+  if (e.key === 'Enter') joinShare();
 });
 
 shareCodeInput.addEventListener('input', (e) => {
   e.target.value = e.target.value.toUpperCase();
+});
+
+// 页面关闭时清理
+window.addEventListener('beforeunload', () => {
+  closeAllPeerConnections();
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+  }
 });
 
 // 初始化

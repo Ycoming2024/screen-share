@@ -1,0 +1,16 @@
+{
+  "name": "teleprompter",
+  "version": "1.0.0",
+  "description": "提词器 - 不会被录屏捕捉",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron": "^28.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.9.1"
+  }
+}
