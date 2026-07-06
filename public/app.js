@@ -1,13 +1,30 @@
-// WebRTC配置 - 添加更多STUN服务器
+// WebRTC配置
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.miwifi.com:3478' },
-    { urls: 'stun:stun.qq.com:3478' }
+    { urls: 'stun:stun.qq.com:3478' },
+    // 公共TURN服务器（免费但不太稳定）
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ],
-  iceCandidatePoolSize: 10
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all'
 };
 
 // DOM元素
@@ -237,15 +254,24 @@ function handleViewerLeft(leavingViewerId) {
 function createPeerConnection(peerId) {
   const pc = new RTCPeerConnection(rtcConfig);
   
+  // ICE候选处理
   pc.onicecandidate = (event) => {
     if (event.candidate && ws.readyState === WebSocket.OPEN) {
+      console.log('发送ICE候选:', event.candidate.type);
       ws.send(JSON.stringify({
         type: 'ice-candidate',
         candidate: event.candidate,
         viewerId: isSharer ? peerId : currentShareCode,
         shareCode: currentShareCode
       }));
+    } else if (!event.candidate) {
+      console.log('ICE候选收集完成');
     }
+  };
+  
+  // ICE收集状态
+  pc.onicegatheringstatechange = () => {
+    console.log('ICE收集状态:', pc.iceGatheringState);
   };
   
   if (!isSharer) {
@@ -529,6 +555,79 @@ window.addEventListener('beforeunload', () => {
     localStream.getTracks().forEach(track => track.stop());
   }
 });
+
+// 诊断功能
+async function runDiagnosis() {
+  const resultDiv = document.getElementById('diagnosis-result');
+  resultDiv.classList.remove('hidden');
+  resultDiv.innerHTML = '<p>正在诊断...</p>';
+  
+  const results = [];
+  
+  // 1. 检查WebSocket连接
+  results.push(`<strong>1. WebSocket连接:</strong> ${ws.readyState === WebSocket.OPEN ? '✅ 已连接' : '❌ 未连接'}`);
+  
+  // 2. 检查WebRTC支持
+  const rtcSupported = !!(window.RTCPeerConnection && navigator.mediaDevices);
+  results.push(`<strong>2. WebRTC支持:</strong> ${rtcSupported ? '✅ 支持' : '❌ 不支持'}`);
+  
+  // 3. 检查屏幕共享支持
+  const screenSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  results.push(`<strong>3. 屏幕共享支持:</strong> ${screenSupported ? '✅ 支持' : '❌ 不支持'}`);
+  
+  // 4. 测试ICE服务器
+  try {
+    const pc = new RTCPeerConnection(rtcConfig);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    
+    // 等待ICE候选收集
+    await new Promise((resolve) => {
+      const candidates = [];
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          candidates.push(e.candidate);
+        } else {
+          resolve(candidates);
+        }
+      };
+      setTimeout(() => resolve(candidates), 5000);
+    });
+    
+    const iceState = pc.iceConnectionState;
+    results.push(`<strong>4. ICE服务器:</strong> ${iceState === 'failed' ? '❌ 连接失败' : '✅ 可用'}`);
+    
+    // 检查是否有relay候选（TURN服务器）
+    const hasRelay = pc.localDescription.sdp.includes('typ relay');
+    results.push(`<strong>5. TURN中继:</strong> ${hasRelay ? '✅ 可用' : '⚠️ 不可用（可能无法穿透NAT）'}`);
+    
+    pc.close();
+  } catch (error) {
+    results.push(`<strong>4. ICE服务器:</strong> ❌ 错误: ${error.message}`);
+  }
+  
+  // 6. 网络信息
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (connection) {
+    results.push(`<strong>6. 网络类型:</strong> ${connection.effectiveType || '未知'}`);
+  }
+  
+  // 显示结果
+  resultDiv.innerHTML = results.join('<br>');
+  
+  // 添加建议
+  let suggestions = '<br><strong>建议:</strong><br>';
+  if (!rtcSupported) {
+    suggestions += '- 请使用最新版 Chrome/Edge/Firefox 浏览器<br>';
+  }
+  if (ws.readyState !== WebSocket.OPEN) {
+    suggestions += '- 请检查服务器是否正常运行<br>';
+  }
+  suggestions += '- 如果跨网络连接失败，可能需要配置 TURN 服务器<br>';
+  suggestions += '- 确保防火墙允许 WebRTC 通信（UDP端口）<br>';
+  
+  resultDiv.innerHTML += suggestions;
+}
 
 // 初始化
 connectWebSocket();

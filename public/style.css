@@ -352,6 +352,36 @@ header {
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* 诊断按钮 */
+.btn-secondary {
+  background: var(--text-secondary);
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #555;
+}
+
+/* 诊断结果 */
+.diagnosis-result {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.8;
+  word-break: break-all;
+}
+
+.diagnosis-result strong {
+  color: var(--text);
+}
+
+.diagnosis-result p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
 /* 响应式 */
 @media (max-width: 480px) {
   .app {
