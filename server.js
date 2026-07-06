@@ -10,6 +10,9 @@ const server = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
   let filePath = path.join(__dirname, 'public', urlPath === '/' ? 'index.html' : urlPath);
   
+  console.log('请求路径:', req.url);
+  console.log('文件路径:', filePath);
+  
   const extname = path.extname(filePath);
   let contentType = 'text/html';
   
@@ -20,9 +23,10 @@ const server = http.createServer((req, res) => {
   
   fs.readFile(filePath, (err, content) => {
     if (err) {
+      console.log('文件读取错误:', err.message);
       if (err.code === 'ENOENT') {
         res.writeHead(404);
-        res.end('文件未找到');
+        res.end('文件未找到: ' + urlPath);
       } else {
         res.writeHead(500);
         res.end('服务器错误');
