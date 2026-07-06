@@ -5,13 +5,17 @@ const path = require('path');
 
 const PORT = process.env.PORT || 8080;
 
-// 获取项目根目录
-const ROOT_DIR = process.cwd();
+// 使用 __dirname 获取服务器文件所在目录
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+console.log('服务器目录:', __dirname);
+console.log('静态文件目录:', PUBLIC_DIR);
+console.log('静态文件目录存在:', fs.existsSync(PUBLIC_DIR));
 
 const server = http.createServer((req, res) => {
   // 移除查询参数
   const urlPath = req.url.split('?')[0];
-  let filePath = path.join(ROOT_DIR, 'public', urlPath === '/' ? 'index.html' : urlPath);
+  let filePath = path.join(PUBLIC_DIR, urlPath === '/' ? 'index.html' : urlPath);
   
   console.log('请求路径:', req.url);
   console.log('文件路径:', filePath);
