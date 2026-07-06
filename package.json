@@ -1,0 +1,12 @@
+{
+  "name": "screen-share",
+  "version": "1.0.0",
+  "description": "WebRTC屏幕共享应用",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

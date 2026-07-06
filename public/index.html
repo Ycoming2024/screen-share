@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>屏幕共享</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        <span>屏幕共享</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- 共享者界面 -->
+      <div id="sharer-section" class="card">
+        <div class="card-header">
+          <h2>共享屏幕</h2>
+          <p class="card-desc">将你的屏幕分享给其他人</p>
+        </div>
+        <div class="card-body">
+          <button id="start-share-btn" class="btn btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+              <polyline points="16 6 12 2 8 6"></polyline>
+              <line x1="12" y1="2" x2="12" y2="15"></line>
+            </svg>
+            开始共享
+          </button>
+          
+          <div id="share-info" class="hidden">
+            <div class="share-code-box">
+              <span class="label">共享码</span>
+              <span id="share-code" class="code"></span>
+            </div>
+            <p class="hint">将此共享码发送给观看者</p>
+            <button id="stop-share-btn" class="btn btn-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              </svg>
+              停止共享
+            </button>
+          </div>
+          
+          <div id="sharer-status" class="status"></div>
+        </div>
+      </div>
+
+      <div class="divider">
+        <span>或</span>
+      </div>
+
+      <!-- 观看者界面 -->
+      <div id="viewer-section" class="card">
+        <div class="card-header">
+          <h2>观看共享</h2>
+          <p class="card-desc">输入共享码观看他人屏幕</p>
+        </div>
+        <div class="card-body">
+          <div class="input-group">
+            <input type="text" id="share-code-input" placeholder="输入共享码" maxlength="5" autocomplete="off" spellcheck="false">
+            <button id="join-btn" class="btn btn-primary">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14"></path>
+                <path d="m12 5 7 7-7 7"></path>
+              </svg>
+            </button>
+          </div>
+          <div id="viewer-status" class="status"></div>
+        </div>
+      </div>
+
+      <!-- 视频显示区域 -->
+      <div id="video-container" class="hidden">
+        <div class="video-wrapper">
+          <video id="remote-video" autoplay playsinline></video>
+          <div id="video-controls">
+            <button id="fullscreen-btn" class="btn-control" title="全屏">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
+                <path d="M21 8V5a2 2 0 0 0-2-2h-3"></path>
+                <path d="M3 16v3a2 2 0 0 0 2 2h3"></path>
+                <path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>
+              </svg>
+            </button>
+            <button id="pip-btn" class="btn-control" title="画中画">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <rect x="12" y="9" width="8" height="6" rx="1"></rect>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="video-status"></div>
+      </div>
+    </main>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>
