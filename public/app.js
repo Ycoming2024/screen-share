@@ -74,17 +74,14 @@ function stopHeartbeat() {
 
 // 初始化PeerJS
 function initPeer() {
-  // 使用自建PeerJS服务器
-  const peerServerUrl = window.location.hostname;
-  const peerServerPort = 9000;
-  
+  // PeerJS 和主服务器同一端口，通过 Nginx/Cloudflare 代理
   peer = new Peer({
-    host: peerServerUrl,
-    port: peerServerPort,
+    host: window.location.hostname,
+    port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
     path: '/peerjs',
+    secure: window.location.protocol === 'https:',
     config: {
       iceServers: [
-        // 自建TURN服务器
         {
           urls: 'turn:172.245.47.251:3478',
           username: 'turnuser',
@@ -95,11 +92,24 @@ function initPeer() {
           username: 'turnuser',
           credential: 'r20X6AncpXA4p3f7SL'
         },
-        // 公共STUN服务器（备用）
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
       ],
-      iceCandidatePoolSize: 10
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'relay'
     }
   });
   

@@ -5,16 +5,9 @@ const path = require('path');
 const { PeerServer } = require('peer');
 
 const PORT = process.env.PORT || 8080;
-
-// 使用 __dirname 获取服务器文件所在目录
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-console.log('服务器目录:', __dirname);
-console.log('静态文件目录:', PUBLIC_DIR);
-console.log('静态文件目录存在:', fs.existsSync(PUBLIC_DIR));
-
 const server = http.createServer((req, res) => {
-  // 移除查询参数
   const urlPath = req.url.split('?')[0];
   let filePath = path.join(PUBLIC_DIR, urlPath === '/' ? 'index.html' : urlPath);
   
@@ -42,14 +35,15 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// 启动 PeerJS 服务器
+// PeerJS 挂载到主服务器同一端口
 const peerServer = PeerServer({
-  port: 9000,
+  server: server,
   path: '/peerjs',
-  allow_discovery: false
+  allow_discovery: false,
+  proxied: true
 });
 
-console.log('PeerJS 服务器运行在 http://localhost:9000/peerjs');
+console.log('PeerJS 运行在 /peerjs 路径');
 
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
@@ -128,14 +122,12 @@ wss.on('connection', (ws) => {
           currentRoom = message.shareCode;
           isSharer = false;
           
-          // 通知观看者加入成功，并发送共享者的PeerID
           safeSend(ws, {
             type: 'joined-room',
             viewerId,
             peerId: room.sharerPeerId
           });
           
-          // 通知共享者有新观看者，发送观看者的PeerID
           safeSend(room.sharer, {
             type: 'viewer-joined',
             viewerId,
@@ -174,7 +166,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-// 定期清理无效房间
 setInterval(() => {
   for (const [code, room] of rooms) {
     if (room.sharer.readyState !== WebSocket.OPEN) {
@@ -182,7 +173,6 @@ setInterval(() => {
         safeSend(viewer.ws, { type: 'sharer-left' });
       }
       rooms.delete(code);
-      console.log(`清理无效房间: ${code}`);
     }
   }
 }, 30000);
