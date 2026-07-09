@@ -119,10 +119,9 @@ function initPeer() {
   
   peer.on('call', (call) => {
     console.log('收到呼叫');
-    if (localStream) {
-      call.answer(localStream);
-      handleCall(call);
-    }
+    // 观看者直接应答，不需要本地流
+    call.answer();
+    handleCall(call);
   });
   
   peer.on('error', (err) => {
@@ -172,11 +171,7 @@ function handleMessage(message) {
       
     case 'joined-room':
       showStatus('viewer-status', '已加入房间，正在连接...', 'info');
-      // 观看者呼叫共享者
-      if (message.peerId && localStream) {
-        const call = peer.call(message.peerId, localStream);
-        handleCall(call);
-      }
+      // 观看者不需要主动呼叫，等待共享者呼叫
       break;
       
     case 'sharer-peer-id':
@@ -284,23 +279,8 @@ async function joinShare() {
     return;
   }
   
-  try {
-    localStream = await navigator.mediaDevices.getDisplayMedia({
-      video: false,
-      audio: true
-    }).catch(() => null);
-    
-    // 如果没有获取到音频流，创建空流
-    if (!localStream) {
-      const ctx = new AudioContext();
-      const oscillator = ctx.createOscillator();
-      const dst = oscillator.connect(ctx.createMediaStreamDestination());
-      oscillator.start();
-      localStream = dst.stream;
-    }
-  } catch (e) {
-    console.log('无音频流');
-  }
+  // 观看者不需要本地流
+  localStream = null;
   
   initPeer();
   
