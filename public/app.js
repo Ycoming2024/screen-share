@@ -92,7 +92,7 @@ function initPeer() {
         { urls: 'stun:stun.ideasip.com' },
         { urls: 'stun:stun.rixtelecom.se' },
         { urls: 'stun:stun.schlund.de' },
-        // 自建TURN服务器
+        // 自建TURN服务器（使用static-auth-secret）
         {
           urls: 'turn:172.245.47.251:3478',
           username: 'turnuser',
@@ -100,11 +100,6 @@ function initPeer() {
         },
         {
           urls: 'turn:172.245.47.251:3478?transport=tcp',
-          username: 'turnuser',
-          credential: 'r20X6AncpXA4p3f7SL'
-        },
-        {
-          urls: 'turns:172.245.47.251:5349',
           username: 'turnuser',
           credential: 'r20X6AncpXA4p3f7SL'
         },
