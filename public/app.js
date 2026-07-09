@@ -87,6 +87,11 @@ function initPeer() {
         { urls: 'stun:stun.qq.com:3478' },
         { urls: 'stun:stun.sipgate.net:3478' },
         { urls: 'stun:stun.antisip.com:3478' },
+        { urls: 'stun:stun.counterpath.net:3478' },
+        { urls: 'stun:stun.ekiga.net' },
+        { urls: 'stun:stun.ideasip.com' },
+        { urls: 'stun:stun.rixtelecom.se' },
+        { urls: 'stun:stun.schlund.de' },
         // 自建TURN服务器
         {
           urls: 'turn:172.245.47.251:3478',
@@ -95,6 +100,11 @@ function initPeer() {
         },
         {
           urls: 'turn:172.245.47.251:3478?transport=tcp',
+          username: 'turnuser',
+          credential: 'r20X6AncpXA4p3f7SL'
+        },
+        {
+          urls: 'turns:172.245.47.251:5349',
           username: 'turnuser',
           credential: 'r20X6AncpXA4p3f7SL'
         },
@@ -113,10 +123,15 @@ function initPeer() {
           urls: 'turn:openrelay.metered.ca:443?transport=tcp',
           username: 'openrelayproject',
           credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=udp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'relay' // 强制使用中继服务器
+      iceTransportPolicy: 'all' // 尝试所有连接方式
     }
   });
   
