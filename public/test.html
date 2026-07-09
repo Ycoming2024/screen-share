@@ -240,12 +240,22 @@
       const result = document.getElementById('network-info');
       
       try {
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        const pc = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: 'turn:172.245.47.251:3478',
+              username: 'turnuser',
+              credential: 'r20X6AncpXA4p3f7SL'
+            },
+            { urls: 'stun:stun.l.google.com:19302' }
+          ]
+        });
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         
         let publicIP = '未知';
         let localIP = '未知';
+        let turnIP = '未知';
         
         pc.onicecandidate = (e) => {
           if (e.candidate) {
@@ -255,17 +265,20 @@
                 publicIP = ip[1];
               } else if (e.candidate.candidate.includes('host')) {
                 localIP = ip[1];
+              } else if (e.candidate.candidate.includes('relay')) {
+                turnIP = ip[1];
               }
             }
           }
         };
         
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 5000));
         pc.close();
         
         result.innerHTML = `
           <strong>公网IP:</strong> ${publicIP}<br>
           <strong>本地IP:</strong> ${localIP}<br>
+          <strong>TURN IP:</strong> ${turnIP}<br>
           <strong>浏览器:</strong> ${navigator.userAgent.split(' ').pop()}
         `;
       } catch (e) {
