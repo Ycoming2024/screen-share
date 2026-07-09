@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC连接测试</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; }
+    h1 { margin-bottom: 20px; }
+    .test-section { margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 4px; }
+    .test-section h3 { margin-bottom: 10px; }
+    .status { padding: 5px 10px; border-radius: 4px; display: inline-block; margin: 5px 0; }
+    .success { background: #d4edda; color: #155724; }
+    .error { background: #f8d7da; color: #721c24; }
+    .warning { background: #fff3cd; color: #856404; }
+    .info { background: #d1ecf1; color: #0c5460; }
+    button { padding: 10px 20px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+    button:hover { background: #0056b3; }
+    pre { background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WebRTC 连接测试</h1>
+    
+    <div class="test-section">
+      <h3>1. ICE服务器测试</h3>
+      <button onclick="testICEServers()">测试ICE服务器</button>
+      <div id="ice-result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h3>2. STUN服务器测试</h3>
+      <button onclick="testSTUN()">测试STUN</button>
+      <div id="stun-result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h3>3. TURN服务器测试</h3>
+      <button onclick="testTURN()">测试TURN</button>
+      <div id="turn-result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h3>4. 完整连接测试</h3>
+      <button onclick="testFullConnection()">测试连接</button>
+      <div id="connection-result"></div>
+    </div>
+    
+    <div class="test-section">
+      <h3>5. 网络信息</h3>
+      <div id="network-info"></div>
+    </div>
+  </div>
+  
+  <script>
+    const iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun.miwifi.com:3478' },
+      { urls: 'stun:stun.qq.com:3478' },
+      {
+        urls: 'turn:172.245.47.251:3478',
+        username: 'turnuser',
+        credential: 'r20X6AncpXA4p3f7SL'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ];
+    
+    // 测试ICE服务器
+    async function testICEServers() {
+      const result = document.getElementById('ice-result');
+      result.innerHTML = '<span class="status info">测试中...</span>';
+      
+      try {
+        const pc = new RTCPeerConnection({ iceServers });
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        let candidates = [];
+        let relayFound = false;
+        
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            candidates.push(e.candidate);
+            if (e.candidate.candidate.includes('relay')) {
+              relayFound = true;
+            }
+          }
+        };
+        
+        await new Promise(resolve => {
+          pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === 'complete') resolve();
+          };
+          setTimeout(resolve, 5000);
+        });
+        
+        pc.close();
+        
+        result.innerHTML = `
+          <span class="status success">✓ ICE服务器可用</span>
+          <br>收集到 ${candidates.length} 个候选
+          <br>TURN中继: ${relayFound ? '✓ 可用' : '✗ 不可用'}
+        `;
+      } catch (e) {
+        result.innerHTML = `<span class="status error">✗ 错误: ${e.message}</span>`;
+      }
+    }
+    
+    // 测试STUN
+    async function testSTUN() {
+      const result = document.getElementById('stun-result');
+      result.innerHTML = '<span class="status info">测试中...</span>';
+      
+      const stunServers = iceServers.filter(s => s.urls.includes('stun'));
+      let successCount = 0;
+      let details = [];
+      
+      for (const server of stunServers) {
+        try {
+          const pc = new RTCPeerConnection({ iceServers: [server] });
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          
+          let hasCandidate = false;
+          pc.onicecandidate = (e) => {
+            if (e.candidate) hasCandidate = true;
+          };
+          
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          pc.close();
+          
+          if (hasCandidate) {
+            successCount++;
+            details.push(`<span class="status success">✓ ${server.urls}</span>`);
+          } else {
+            details.push(`<span class="status warning">⚠ ${server.urls} (无候选)</span>`);
+          }
+        } catch (e) {
+          details.push(`<span class="status error">✗ ${server.urls}</span>`);
+        }
+      }
+      
+      result.innerHTML = details.join('<br>') + `<br><br>成功: ${successCount}/${stunServers.length}`;
+    }
+    
+    // 测试TURN
+    async function testTURN() {
+      const result = document.getElementById('turn-result');
+      result.innerHTML = '<span class="status info">测试中...</span>';
+      
+      const turnServers = iceServers.filter(s => s.urls.includes('turn'));
+      let details = [];
+      
+      for (const server of turnServers) {
+        try {
+          const pc = new RTCPeerConnection({ iceServers: [server] });
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          
+          let relayFound = false;
+          pc.onicecandidate = (e) => {
+            if (e.candidate && e.candidate.candidate.includes('relay')) {
+              relayFound = true;
+            }
+          };
+          
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          pc.close();
+          
+          if (relayFound) {
+            details.push(`<span class="status success">✓ ${server.urls}</span>`);
+          } else {
+            details.push(`<span class="status warning">⚠ ${server.urls} (无中继)</span>`);
+          }
+        } catch (e) {
+          details.push(`<span class="status error">✗ ${server.urls}: ${e.message}</span>`);
+        }
+      }
+      
+      result.innerHTML = details.join('<br>');
+    }
+    
+    // 完整连接测试
+    async function testFullConnection() {
+      const result = document.getElementById('connection-result');
+      result.innerHTML = '<span class="status info">测试中...</span>';
+      
+      try {
+        const pc1 = new RTCPeerConnection({ iceServers });
+        const pc2 = new RTCPeerConnection({ iceServers });
+        
+        const channel = pc1.createDataChannel('test');
+        
+        let connected = false;
+        
+        pc2.ondatachannel = (e) => {
+          e.channel.onopen = () => {
+            connected = true;
+          };
+        };
+        
+        const offer = await pc1.createOffer();
+        await pc1.setLocalDescription(offer);
+        await pc2.setRemoteDescription(offer);
+        
+        const answer = await pc2.createAnswer();
+        await pc2.setLocalDescription(answer);
+        await pc1.setRemoteDescription(answer);
+        
+        pc1.onicecandidate = (e) => {
+          if (e.candidate) pc2.addIceCandidate(e.candidate);
+        };
+        pc2.onicecandidate = (e) => {
+          if (e.candidate) pc1.addIceCandidate(e.candidate);
+        };
+        
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        pc1.close();
+        pc2.close();
+        
+        if (connected) {
+          result.innerHTML = '<span class="status success">✓ P2P连接成功</span>';
+        } else {
+          result.innerHTML = '<span class="status warning">⚠ 连接超时，可能需要TURN服务器</span>';
+        }
+      } catch (e) {
+        result.innerHTML = `<span class="status error">✗ 错误: ${e.message}</span>`;
+      }
+    }
+    
+    // 网络信息
+    async function getNetworkInfo() {
+      const result = document.getElementById('network-info');
+      
+      try {
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        let publicIP = '未知';
+        let localIP = '未知';
+        
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            const ip = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+            if (ip) {
+              if (e.candidate.candidate.includes('srflx')) {
+                publicIP = ip[1];
+              } else if (e.candidate.candidate.includes('host')) {
+                localIP = ip[1];
+              }
+            }
+          }
+        };
+        
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        pc.close();
+        
+        result.innerHTML = `
+          <strong>公网IP:</strong> ${publicIP}<br>
+          <strong>本地IP:</strong> ${localIP}<br>
+          <strong>浏览器:</strong> ${navigator.userAgent.split(' ').pop()}
+        `;
+      } catch (e) {
+        result.innerHTML = `<span class="status error">获取失败: ${e.message}</span>`;
+      }
+    }
+    
+    getNetworkInfo();
+  </script>
+</body>
+</html>
