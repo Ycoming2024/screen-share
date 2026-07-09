@@ -77,9 +77,16 @@ function initPeer() {
   peer = new Peer({
     config: {
       iceServers: [
+        // 公共STUN服务器
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
         { urls: 'stun:stun.miwifi.com:3478' },
+        { urls: 'stun:stun.qq.com:3478' },
+        { urls: 'stun:stun.sipgate.net:3478' },
+        { urls: 'stun:stun.antisip.com:3478' },
         // 自建TURN服务器
         {
           urls: 'turn:172.245.47.251:3478',
@@ -90,8 +97,26 @@ function initPeer() {
           urls: 'turn:172.245.47.251:3478?transport=tcp',
           username: 'turnuser',
           credential: 'r20X6AncpXA4p3f7SL'
+        },
+        // 免费TURN服务器（备用）
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
-      ]
+      ],
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'relay' // 强制使用中继服务器
     }
   });
   
