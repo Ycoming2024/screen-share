@@ -108,8 +108,7 @@ function initPeer() {
           credential: 'openrelayproject'
         }
       ],
-      iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'relay'
+      iceCandidatePoolSize: 10
     }
   });
   
@@ -119,8 +118,9 @@ function initPeer() {
   
   peer.on('call', (call) => {
     console.log('收到呼叫');
-    // 观看者直接应答，不需要本地流
-    call.answer();
+    // 创建一个空流用于应答
+    const emptyStream = new MediaStream();
+    call.answer(emptyStream);
     handleCall(call);
   });
   
@@ -134,10 +134,12 @@ function handleCall(call) {
   currentCall = call;
   
   call.on('stream', (remoteStream) => {
-    console.log('收到远程流');
-    remoteVideo.srcObject = remoteStream;
-    videoContainer.classList.remove('hidden');
-    videoStatus.textContent = '正在观看共享屏幕';
+    console.log('收到远程流，轨道数:', remoteStream.getTracks().length);
+    if (remoteStream.getTracks().length > 0) {
+      remoteVideo.srcObject = remoteStream;
+      videoContainer.classList.remove('hidden');
+      videoStatus.textContent = '正在观看共享屏幕';
+    }
   });
   
   call.on('close', () => {
@@ -147,7 +149,7 @@ function handleCall(call) {
   
   call.on('error', (err) => {
     console.error('呼叫错误:', err);
-    videoStatus.textContent = '连接错误';
+    videoStatus.textContent = '连接错误: ' + err.message;
   });
 }
 
@@ -199,11 +201,20 @@ function handleMessage(message) {
 
 // 共享者：处理观看者加入
 function handleViewerJoined(viewerPeerId) {
-  console.log('观看者加入:', viewerPeerId);
+  console.log('观看者加入，PeerID:', viewerPeerId);
+  console.log('本地流状态:', localStream ? '有' : '无', '轨道数:', localStream ? localStream.getTracks().length : 0);
   
   if (peer && localStream && viewerPeerId) {
+    console.log('正在呼叫观看者...');
     const call = peer.call(viewerPeerId, localStream);
-    handleCall(call);
+    if (call) {
+      handleCall(call);
+      console.log('呼叫已发起');
+    } else {
+      console.error('呼叫失败');
+    }
+  } else {
+    console.error('无法呼叫：', { peer: !!peer, localStream: !!localStream, viewerPeerId });
   }
   
   updateViewerCount();
