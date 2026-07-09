@@ -38,7 +38,7 @@ const server = http.createServer((req, res) => {
 // PeerJS 挂载到主服务器同一端口
 const peerServer = PeerServer({
   server: server,
-  path: '/peerjs',
+  path: '/p',
   allow_discovery: false,
   proxied: true
 });

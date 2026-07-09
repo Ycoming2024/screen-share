@@ -78,7 +78,7 @@ function initPeer() {
   peer = new Peer({
     host: window.location.hostname,
     port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
-    path: '/',
+    path: '/p',
     secure: window.location.protocol === 'https:',
     config: {
       iceServers: [
