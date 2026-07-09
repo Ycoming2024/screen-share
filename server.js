@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { PeerServer } = require('peer');
 
 const PORT = process.env.PORT || 8080;
 
@@ -17,10 +18,6 @@ const server = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
   let filePath = path.join(PUBLIC_DIR, urlPath === '/' ? 'index.html' : urlPath);
   
-  console.log('请求路径:', req.url);
-  console.log('文件路径:', filePath);
-  console.log('文件存在:', fs.existsSync(filePath));
-  
   const extname = path.extname(filePath);
   let contentType = 'text/html';
   
@@ -31,10 +28,9 @@ const server = http.createServer((req, res) => {
   
   fs.readFile(filePath, (err, content) => {
     if (err) {
-      console.log('文件读取错误:', err.message);
       if (err.code === 'ENOENT') {
         res.writeHead(404);
-        res.end('文件未找到: ' + urlPath);
+        res.end('文件未找到');
       } else {
         res.writeHead(500);
         res.end('服务器错误');
@@ -45,6 +41,15 @@ const server = http.createServer((req, res) => {
     }
   });
 });
+
+// 启动 PeerJS 服务器
+const peerServer = PeerServer({
+  port: 9000,
+  path: '/peerjs',
+  allow_discovery: false
+});
+
+console.log('PeerJS 服务器运行在 http://localhost:9000/peerjs');
 
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();

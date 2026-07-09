@@ -74,25 +74,17 @@ function stopHeartbeat() {
 
 // 初始化PeerJS
 function initPeer() {
+  // 使用自建PeerJS服务器
+  const peerServerUrl = window.location.hostname;
+  const peerServerPort = 9000;
+  
   peer = new Peer({
+    host: peerServerUrl,
+    port: peerServerPort,
+    path: '/peerjs',
     config: {
       iceServers: [
-        // 公共STUN服务器
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.miwifi.com:3478' },
-        { urls: 'stun:stun.qq.com:3478' },
-        { urls: 'stun:stun.sipgate.net:3478' },
-        { urls: 'stun:stun.antisip.com:3478' },
-        { urls: 'stun:stun.counterpath.net:3478' },
-        { urls: 'stun:stun.ekiga.net' },
-        { urls: 'stun:stun.ideasip.com' },
-        { urls: 'stun:stun.rixtelecom.se' },
-        { urls: 'stun:stun.schlund.de' },
-        // 自建TURN服务器（使用static-auth-secret）
+        // 自建TURN服务器
         {
           urls: 'turn:172.245.47.251:3478',
           username: 'turnuser',
@@ -103,30 +95,11 @@ function initPeer() {
           username: 'turnuser',
           credential: 'r20X6AncpXA4p3f7SL'
         },
-        // 免费TURN服务器（备用）
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=udp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        }
+        // 公共STUN服务器（备用）
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
       ],
-      iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'all' // 尝试所有连接方式
+      iceCandidatePoolSize: 10
     }
   });
   
