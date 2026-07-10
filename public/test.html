@@ -24,6 +24,12 @@
     <h1>WebRTC 连接测试</h1>
     
     <div class="test-section">
+      <h3>0. Signaling service test</h3>
+      <button onclick="testSignaling()">Test signaling</button>
+      <div id="signaling-result"></div>
+    </div>
+    
+    <div class="test-section">
       <h3>1. ICE服务器测试</h3>
       <button onclick="testICEServers()">测试ICE服务器</button>
       <div id="ice-result"></div>
@@ -54,10 +60,57 @@
   </div>
   
   <script>
+    async function testSignaling() {
+      const result = document.getElementById('signaling-result');
+      result.innerHTML = '<span class="status info">Testing...</span>';
+
+      const rows = [];
+
+      try {
+        const health = await fetch('/health', { cache: 'no-store' });
+        rows.push(`<span class="status ${health.ok ? 'success' : 'error'}">/health ${health.status}</span>`);
+      } catch (e) {
+        rows.push(`<span class="status error">/health failed: ${e.message}</span>`);
+      }
+
+      try {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        await new Promise((resolve, reject) => {
+          const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+          const timer = setTimeout(() => {
+            socket.close();
+            reject(new Error('timeout'));
+          }, 3000);
+
+          socket.onopen = () => {
+            clearTimeout(timer);
+            socket.close();
+            resolve();
+          };
+          socket.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error('connection error'));
+          };
+        });
+        rows.push('<span class="status success">/ws connected</span>');
+      } catch (e) {
+        rows.push(`<span class="status error">/ws failed: ${e.message}</span>`);
+      }
+
+      try {
+        const peerId = await fetch(`/p/peerjs/id?ts=${Date.now()}&version=1.5.2`, { cache: 'no-store' });
+        rows.push(`<span class="status ${peerId.ok ? 'success' : 'error'}">/p/peerjs/id ${peerId.status}</span>`);
+      } catch (e) {
+        rows.push(`<span class="status error">/p/peerjs/id failed: ${e.message}</span>`);
+      }
+
+      result.innerHTML = rows.join('<br>');
+    }
+
     const iceServers = [
       // 自建TURN服务器
       {
-        urls: 'turn:172.245.47.251:3478',
+        urls: 'turn:172.245.47.251:3478?transport=udp',
         username: 'turnuser',
         credential: 'r20X6AncpXA4p3f7SL'
       },
@@ -65,6 +118,21 @@
         urls: 'turn:172.245.47.251:3478?transport=tcp',
         username: 'turnuser',
         credential: 'r20X6AncpXA4p3f7SL'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
       },
       // 公共STUN服务器
       { urls: 'stun:stun.l.google.com:19302' },

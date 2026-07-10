@@ -1,5 +1,36 @@
 // 版本号
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.4.0';
+const ROOM_WS_PATH = '/ws';
+const PEER_PATH = '/p';
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  {
+    urls: 'turn:172.245.47.251:3478?transport=udp',
+    username: 'turnuser',
+    credential: 'r20X6AncpXA4p3f7SL'
+  },
+  {
+    urls: 'turn:172.245.47.251:3478?transport=tcp',
+    username: 'turnuser',
+    credential: 'r20X6AncpXA4p3f7SL'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  }
+];
 
 // DOM元素
 const startShareBtn = document.getElementById('start-share-btn');
@@ -28,7 +59,7 @@ let heartbeatTimer = null;
 // WebSocket连接
 function connectWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${protocol}//${window.location.host}`);
+  ws = new WebSocket(`${protocol}//${window.location.host}${ROOM_WS_PATH}`);
   
   ws.onopen = () => {
     console.log('WebSocket已连接');
@@ -55,6 +86,18 @@ function connectWebSocket() {
   };
 }
 
+function sendWsMessage(message, statusElementId) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+    return true;
+  }
+
+  if (statusElementId) {
+    showStatus(statusElementId, 'WebSocket not connected, please try again later', 'error');
+  }
+  return false;
+}
+
 // 心跳
 function startHeartbeat() {
   stopHeartbeat();
@@ -74,40 +117,19 @@ function stopHeartbeat() {
 
 // 初始化PeerJS
 function initPeer() {
+  if (peer && !peer.destroyed) {
+    peer.destroy();
+  }
+
   // PeerJS 和主服务器同一端口，通过 Nginx/Cloudflare 代理
   peer = new Peer({
     host: window.location.hostname,
     port: window.location.port || (window.location.protocol === 'https:' ? 443 : 80),
-    path: '/p',
+    path: PEER_PATH,
     secure: window.location.protocol === 'https:',
+    debug: 2,
     config: {
-      iceServers: [
-        {
-          urls: 'turn:172.245.47.251:3478',
-          username: 'turnuser',
-          credential: 'r20X6AncpXA4p3f7SL'
-        },
-        {
-          urls: 'turn:172.245.47.251:3478?transport=tcp',
-          username: 'turnuser',
-          credential: 'r20X6AncpXA4p3f7SL'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        }
-      ],
+      iceServers: ICE_SERVERS,
       iceCandidatePoolSize: 10
     }
   });
@@ -125,6 +147,7 @@ function initPeer() {
   });
   
   peer.on('error', (err) => {
+    showStatus(isSharer ? 'sharer-status' : 'viewer-status', `PeerJS connection failed: ${err.type || err.message || err}`, 'error');
     console.error('PeerJS错误:', err);
   });
 }
@@ -241,10 +264,10 @@ async function startShare() {
     
     peer.on('open', (id) => {
       console.log('共享者PeerID:', id);
-      ws.send(JSON.stringify({
+      sendWsMessage({
         type: 'create-room',
         peerId: id
-      }));
+      }, 'sharer-status');
     });
     
   } catch (error) {
@@ -292,16 +315,17 @@ async function joinShare() {
   
   // 观看者不需要本地流
   localStream = null;
+  isSharer = false;
   
   initPeer();
   
   peer.on('open', (id) => {
     console.log('观看者PeerID:', id);
-    ws.send(JSON.stringify({
+    sendWsMessage({
       type: 'join-room',
       shareCode: code,
       peerId: id
-    }));
+    }, 'viewer-status');
   });
 }
 
