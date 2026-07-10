@@ -1,9 +1,10 @@
 // 版本号
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.3';
 const ROOM_WS_PATH = '/ws';
 const PEER_PATH = '/p';
 const BLACK_FRAME_TIMEOUT_MS = 8000;
 const RECONNECT_REQUEST_COOLDOWN_MS = 10000;
+const RELAY_MODE_COOLDOWN_MS = 12000;
 const VIDEO_MAX_BITRATE = 1200 * 1000;
 const VIDEO_MAX_FRAMERATE = 20;
 const CAPTURE_CONSTRAINTS = {
@@ -33,6 +34,26 @@ const TURN_SERVERS = [
   },
   {
     urls: 'turn:172.245.47.251:3478?transport=tcp',
+    username: 'turnuser',
+    credential: 'r20X6AncpXA4p3f7SL'
+  },
+  {
+    urls: 'turn:172.245.47.251:443?transport=tcp',
+    username: 'turnuser',
+    credential: 'r20X6AncpXA4p3f7SL'
+  },
+  {
+    urls: 'turn:turn.ycoming.top:443?transport=tcp',
+    username: 'turnuser',
+    credential: 'r20X6AncpXA4p3f7SL'
+  },
+  {
+    urls: 'turns:turn.ycoming.top:443?transport=tcp',
+    username: 'turnuser',
+    credential: 'r20X6AncpXA4p3f7SL'
+  },
+  {
+    urls: 'turns:turn.ycoming.top:5349?transport=tcp',
     username: 'turnuser',
     credential: 'r20X6AncpXA4p3f7SL'
   },
@@ -81,6 +102,8 @@ let heartbeatTimer = null;
 let blackFrameTimer = null;
 let lastReconnectRequestAt = 0;
 let optimizedIceServers = ICE_SERVERS;
+let relayOnlyMode = false;
+let lastRelayModeAt = 0;
 
 function candidateType(candidate) {
   return candidate.type || (candidate.candidate.match(/ typ ([a-z0-9]+)/i) || [])[1] || 'unknown';
@@ -220,6 +243,7 @@ function initPeer() {
     debug: 2,
     config: {
       iceServers: getIceServers(),
+      iceTransportPolicy: relayOnlyMode ? 'relay' : 'all',
       iceCandidatePoolSize: 10
     }
   });
@@ -328,6 +352,11 @@ function requestReconnectCall(reason) {
   if (isSharer || !currentShareCode) return;
 
   const now = Date.now();
+  if (!relayOnlyMode && now - lastRelayModeAt > RELAY_MODE_COOLDOWN_MS) {
+    switchViewerToRelayMode(reason);
+    return;
+  }
+
   if (now - lastReconnectRequestAt < RECONNECT_REQUEST_COOLDOWN_MS) return;
   lastReconnectRequestAt = now;
 
@@ -343,6 +372,40 @@ function requestReconnectCall(reason) {
     type: 'request-call',
     shareCode: currentShareCode
   }, 'viewer-status');
+}
+
+function switchViewerToRelayMode(reason) {
+  if (isSharer || !currentShareCode) return;
+
+  relayOnlyMode = true;
+  lastRelayModeAt = Date.now();
+  lastReconnectRequestAt = lastRelayModeAt;
+  videoStatus.textContent = '直连失败，正在切换 TURN 中继模式...';
+  showStatus('viewer-status', '国内网络直连失败，正在切换 TURN 中继模式...', 'info');
+
+  if (blackFrameTimer) {
+    clearTimeout(blackFrameTimer);
+    blackFrameTimer = null;
+  }
+  if (currentCall) {
+    currentCall.close();
+    currentCall = null;
+  }
+  if (peer) {
+    peer.destroy();
+    peer = null;
+  }
+
+  console.warn('Switching viewer to relay-only mode:', reason);
+  initPeer();
+  peer.on('open', (id) => {
+    sendWsMessage({
+      type: 'join-room',
+      shareCode: currentShareCode,
+      peerId: id,
+      relayOnly: true
+    }, 'viewer-status');
+  });
 }
 
 function scheduleBlackFrameCheck(remoteStream) {
@@ -537,6 +600,8 @@ async function joinShare() {
   localStream = null;
   isSharer = false;
   currentShareCode = code;
+  relayOnlyMode = false;
+  lastRelayModeAt = 0;
   
   initPeer();
   
