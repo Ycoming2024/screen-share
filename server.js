@@ -167,6 +167,22 @@ wss.on('connection', (ws) => {
           
           console.log(`观看者 ${viewerId} 加入房间 ${message.shareCode}`);
           break;
+
+        case 'request-call':
+          if (!currentRoom || isSharer) return;
+
+          const reconnectRoom = rooms.get(currentRoom);
+          if (!reconnectRoom || reconnectRoom.sharer.readyState !== WebSocket.OPEN) return;
+
+          const reconnectViewer = reconnectRoom.viewers.get(currentViewerId);
+          if (!reconnectViewer) return;
+
+          safeSend(reconnectRoom.sharer, {
+            type: 'request-call',
+            viewerId: currentViewerId,
+            peerId: reconnectViewer.peerId
+          });
+          break;
       }
     } catch (e) {
       console.error('消息处理错误:', e);

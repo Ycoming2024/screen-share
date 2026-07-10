@@ -1,12 +1,31 @@
 // 版本号
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.4.2';
 const ROOM_WS_PATH = '/ws';
 const PEER_PATH = '/p';
-const ICE_SERVERS = [
+const BLACK_FRAME_TIMEOUT_MS = 8000;
+const RECONNECT_REQUEST_COOLDOWN_MS = 10000;
+const VIDEO_MAX_BITRATE = 1200 * 1000;
+const VIDEO_MAX_FRAMERATE = 20;
+const CAPTURE_CONSTRAINTS = {
+  video: {
+    cursor: 'always',
+    width: { ideal: 1280, max: 1920 },
+    height: { ideal: 720, max: 1080 },
+    frameRate: { ideal: 15, max: VIDEO_MAX_FRAMERATE }
+  },
+  audio: false
+};
+const STUN_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:openrelay.metered.ca:80' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: 'stun:stun.nextcloud.com:443' },
+  { urls: 'stun:stun.sipgate.net:3478' },
+  { urls: 'stun:stun.12connect.com:3478' }
+];
+const TURN_SERVERS = [
   {
     urls: 'turn:172.245.47.251:3478?transport=udp',
     username: 'turnuser',
@@ -33,6 +52,8 @@ const ICE_SERVERS = [
     credential: 'openrelayproject'
   }
 ];
+const DEFAULT_STUN_SERVERS = STUN_SERVERS.slice(0, 4);
+const ICE_SERVERS = [...DEFAULT_STUN_SERVERS, ...TURN_SERVERS];
 
 // DOM元素
 const startShareBtn = document.getElementById('start-share-btn');
@@ -57,6 +78,73 @@ let currentCall = null;
 let isSharer = false;
 let currentShareCode = null;
 let heartbeatTimer = null;
+let blackFrameTimer = null;
+let lastReconnectRequestAt = 0;
+let optimizedIceServers = ICE_SERVERS;
+
+function candidateType(candidate) {
+  return candidate.type || (candidate.candidate.match(/ typ ([a-z0-9]+)/i) || [])[1] || 'unknown';
+}
+
+async function probeStunServer(server, timeoutMs = 2500) {
+  const startedAt = performance.now();
+  const pc = new RTCPeerConnection({ iceServers: [server] });
+  let ok = false;
+
+  pc.createDataChannel('stun-probe');
+  pc.onicecandidate = (event) => {
+    if (event.candidate && candidateType(event.candidate) === 'srflx') {
+      ok = true;
+    }
+  };
+
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      pc.onicegatheringstatechange = () => {
+        if (ok || pc.iceGatheringState === 'complete') {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+    });
+  } catch (err) {
+    console.warn('STUN probe failed:', server.urls, err);
+  } finally {
+    pc.close();
+  }
+
+  return {
+    server,
+    ok,
+    elapsed: Math.round(performance.now() - startedAt)
+  };
+}
+
+async function optimizeIceServers() {
+  const results = await Promise.all(STUN_SERVERS.map(server => probeStunServer(server)));
+  const goodStunServers = results
+    .filter(result => result.ok)
+    .sort((a, b) => a.elapsed - b.elapsed)
+    .map(result => result.server);
+  const selectedStunServers = goodStunServers.length
+    ? goodStunServers.slice(0, 4)
+    : DEFAULT_STUN_SERVERS;
+
+  optimizedIceServers = [
+    ...selectedStunServers,
+    ...TURN_SERVERS
+  ];
+
+  console.log('Optimized ICE servers:', results);
+}
+
+function getIceServers() {
+  return optimizedIceServers;
+}
 
 // WebSocket连接
 function connectWebSocket() {
@@ -131,7 +219,7 @@ function initPeer() {
     secure: window.location.protocol === 'https:',
     debug: 2,
     config: {
-      iceServers: ICE_SERVERS,
+      iceServers: getIceServers(),
       iceCandidatePoolSize: 10
     }
   });
@@ -181,6 +269,7 @@ function describeRemoteStream(remoteStream) {
     videoTrack.onunmute = () => {
       videoStatus.textContent = '正在观看共享屏幕';
       playRemoteVideo();
+      scheduleBlackFrameCheck(remoteStream);
     };
     videoTrack.onended = () => {
       videoStatus.textContent = '共享视频轨道已结束';
@@ -195,8 +284,84 @@ function describeRemoteStream(remoteStream) {
   });
 }
 
+function tuneOutgoingVideo(call) {
+  const pc = call && call.peerConnection;
+  if (!pc || !localStream) return;
+
+  const applyLimits = () => {
+    for (const sender of pc.getSenders()) {
+      if (!sender.track || sender.track.kind !== 'video') continue;
+
+      const params = sender.getParameters();
+      params.encodings = params.encodings && params.encodings.length ? params.encodings : [{}];
+      params.encodings[0].maxBitrate = VIDEO_MAX_BITRATE;
+      params.encodings[0].maxFramerate = VIDEO_MAX_FRAMERATE;
+      sender.setParameters(params).catch((err) => {
+        console.warn('Failed to tune video sender:', err);
+      });
+    }
+  };
+
+  applyLimits();
+  setTimeout(applyLimits, 1000);
+  setTimeout(applyLimits, 3000);
+}
+
+function monitorPeerConnection(call) {
+  const pc = call && call.peerConnection;
+  if (!pc) return;
+
+  const updateState = () => {
+    const state = pc.connectionState || pc.iceConnectionState;
+    console.log('WebRTC connection state:', state);
+
+    if (!isSharer && ['disconnected', 'failed'].includes(state)) {
+      requestReconnectCall('connection-state');
+    }
+  };
+
+  pc.onconnectionstatechange = updateState;
+  pc.oniceconnectionstatechange = updateState;
+}
+
+function requestReconnectCall(reason) {
+  if (isSharer || !currentShareCode) return;
+
+  const now = Date.now();
+  if (now - lastReconnectRequestAt < RECONNECT_REQUEST_COOLDOWN_MS) return;
+  lastReconnectRequestAt = now;
+
+  console.warn('Requesting a fresh media call:', reason);
+  videoStatus.textContent = '画面未恢复，正在重新连接...';
+
+  if (currentCall) {
+    currentCall.close();
+    currentCall = null;
+  }
+
+  sendWsMessage({
+    type: 'request-call',
+    shareCode: currentShareCode
+  }, 'viewer-status');
+}
+
+function scheduleBlackFrameCheck(remoteStream) {
+  if (blackFrameTimer) clearTimeout(blackFrameTimer);
+
+  blackFrameTimer = setTimeout(() => {
+    const hasVideoTrack = remoteStream.getVideoTracks().some(track => track.readyState === 'live');
+    const hasFrame = remoteVideo.videoWidth > 0 && remoteVideo.videoHeight > 0 && remoteVideo.readyState >= 2;
+
+    if (hasVideoTrack && !hasFrame) {
+      requestReconnectCall('black-frame');
+    }
+  }, BLACK_FRAME_TIMEOUT_MS);
+}
+
 function handleCall(call) {
   currentCall = call;
+  tuneOutgoingVideo(call);
+  monitorPeerConnection(call);
   
   call.on('stream', (remoteStream) => {
     console.log('收到远程流，轨道数:', remoteStream.getTracks().length);
@@ -208,12 +373,17 @@ function handleCall(call) {
         playRemoteVideo();
       };
       videoContainer.classList.remove('hidden');
+      scheduleBlackFrameCheck(remoteStream);
       playRemoteVideo();
       videoStatus.textContent = '正在观看共享屏幕';
     }
   });
   
   call.on('close', () => {
+    if (blackFrameTimer) {
+      clearTimeout(blackFrameTimer);
+      blackFrameTimer = null;
+    }
     console.log('呼叫关闭');
     videoStatus.textContent = '连接已关闭';
   });
@@ -239,6 +409,10 @@ function handleMessage(message) {
       break;
       
     case 'viewer-joined':
+      handleViewerJoined(message.peerId);
+      break;
+
+    case 'request-call':
       handleViewerJoined(message.peerId);
       break;
       
@@ -294,14 +468,7 @@ function handleViewerJoined(viewerPeerId) {
 // 开始共享
 async function startShare() {
   try {
-    localStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        cursor: 'always',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
-      },
-      audio: true
-    });
+    localStream = await navigator.mediaDevices.getDisplayMedia(CAPTURE_CONSTRAINTS);
     
     localStream.getVideoTracks()[0].onended = () => {
       stopShare();
@@ -326,6 +493,11 @@ async function startShare() {
 
 // 停止共享
 function stopShare() {
+  if (blackFrameTimer) {
+    clearTimeout(blackFrameTimer);
+    blackFrameTimer = null;
+  }
+
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
@@ -364,6 +536,7 @@ async function joinShare() {
   // 观看者不需要本地流
   localStream = null;
   isSharer = false;
+  currentShareCode = code;
   
   initPeer();
   
@@ -477,3 +650,6 @@ window.addEventListener('beforeunload', () => {
 
 // 初始化
 connectWebSocket();
+optimizeIceServers().catch((err) => {
+  console.warn('ICE optimization failed:', err);
+});
