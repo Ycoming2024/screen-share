@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>WebRTC连接测试</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC 连接测试</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
-    .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; }
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; color: #1f2937; }
+    .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; }
     h1 { margin-bottom: 20px; }
     .test-section { margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 4px; }
     .test-section h3 { margin-bottom: 10px; }
@@ -16,99 +17,57 @@
     .info { background: #d1ecf1; color: #0c5460; }
     button { padding: 10px 20px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
     button:hover { background: #0056b3; }
-    pre { background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+    pre { background: #f1f5f9; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+    .muted { color: #6b7280; font-size: 12px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>WebRTC 连接测试</h1>
-    
+
     <div class="test-section">
-      <h3>0. Signaling service test</h3>
-      <button onclick="testSignaling()">Test signaling</button>
+      <h3>0. 信令服务测试</h3>
+      <button onclick="testSignaling()">测试信令</button>
       <div id="signaling-result"></div>
     </div>
-    
+
     <div class="test-section">
-      <h3>1. ICE服务器测试</h3>
-      <button onclick="testICEServers()">测试ICE服务器</button>
+      <h3>1. ICE 候选收集测试</h3>
+      <button onclick="testICEServers()">测试 ICE</button>
       <div id="ice-result"></div>
     </div>
-    
+
     <div class="test-section">
-      <h3>2. STUN服务器测试</h3>
-      <button onclick="testSTUN()">测试STUN</button>
+      <h3>2. STUN 测试</h3>
+      <button onclick="testSTUN()">测试 STUN</button>
       <div id="stun-result"></div>
     </div>
-    
+
     <div class="test-section">
-      <h3>3. TURN服务器测试</h3>
-      <button onclick="testTURN()">测试TURN</button>
+      <h3>3. TURN 测试</h3>
+      <button onclick="testTURN()">测试 TURN</button>
       <div id="turn-result"></div>
     </div>
-    
+
     <div class="test-section">
-      <h3>4. 完整连接测试</h3>
+      <h3>4. 完整 P2P 测试</h3>
       <button onclick="testFullConnection()">测试连接</button>
       <div id="connection-result"></div>
     </div>
-    
+
     <div class="test-section">
       <h3>5. 网络信息</h3>
+      <button onclick="getNetworkInfo()">刷新网络信息</button>
       <div id="network-info"></div>
     </div>
   </div>
-  
+
   <script>
-    async function testSignaling() {
-      const result = document.getElementById('signaling-result');
-      result.innerHTML = '<span class="status info">Testing...</span>';
-
-      const rows = [];
-
-      try {
-        const health = await fetch('/health', { cache: 'no-store' });
-        rows.push(`<span class="status ${health.ok ? 'success' : 'error'}">/health ${health.status}</span>`);
-      } catch (e) {
-        rows.push(`<span class="status error">/health failed: ${e.message}</span>`);
-      }
-
-      try {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        await new Promise((resolve, reject) => {
-          const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
-          const timer = setTimeout(() => {
-            socket.close();
-            reject(new Error('timeout'));
-          }, 3000);
-
-          socket.onopen = () => {
-            clearTimeout(timer);
-            socket.close();
-            resolve();
-          };
-          socket.onerror = () => {
-            clearTimeout(timer);
-            reject(new Error('connection error'));
-          };
-        });
-        rows.push('<span class="status success">/ws connected</span>');
-      } catch (e) {
-        rows.push(`<span class="status error">/ws failed: ${e.message}</span>`);
-      }
-
-      try {
-        const peerId = await fetch(`/p/peerjs/id?ts=${Date.now()}&version=1.5.2`, { cache: 'no-store' });
-        rows.push(`<span class="status ${peerId.ok ? 'success' : 'error'}">/p/peerjs/id ${peerId.status}</span>`);
-      } catch (e) {
-        rows.push(`<span class="status error">/p/peerjs/id failed: ${e.message}</span>`);
-      }
-
-      result.innerHTML = rows.join('<br>');
-    }
-
     const iceServers = [
-      // 自建TURN服务器
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:openrelay.metered.ca:80' },
       {
         urls: 'turn:172.245.47.251:3478?transport=udp',
         username: 'turnuser',
@@ -133,227 +92,238 @@
         urls: 'turn:openrelay.metered.ca:443?transport=tcp',
         username: 'openrelayproject',
         credential: 'openrelayproject'
-      },
-      // 公共STUN服务器
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
+      }
     ];
-    
-    // 测试ICE服务器
+
+    function status(text, type = 'info') {
+      return `<span class="status ${type}">${text}</span>`;
+    }
+
+    function candidateType(candidate) {
+      return candidate.type || (candidate.candidate.match(/ typ ([a-z0-9]+)/i) || [])[1] || 'unknown';
+    }
+
+    function candidateAddress(candidate) {
+      if (candidate.address) return candidate.address;
+      const parts = candidate.candidate.split(' ');
+      return parts[4] || 'unknown';
+    }
+
+    function candidateSummary(candidates) {
+      const counts = { host: 0, srflx: 0, relay: 0, unknown: 0 };
+      for (const candidate of candidates) {
+        const type = candidateType(candidate);
+        counts[type] = (counts[type] || 0) + 1;
+      }
+      return counts;
+    }
+
+    async function collectCandidates(servers, timeoutMs = 5000) {
+      const pc = new RTCPeerConnection({ iceServers: servers });
+      const candidates = [];
+
+      pc.createDataChannel('ice-test');
+      pc.onicecandidate = (event) => {
+        if (event.candidate) candidates.push(event.candidate);
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await new Promise((resolve) => {
+        pc.onicegatheringstatechange = () => {
+          if (pc.iceGatheringState === 'complete') resolve();
+        };
+        setTimeout(resolve, timeoutMs);
+      });
+
+      pc.close();
+      return candidates;
+    }
+
+    function renderCandidates(candidates) {
+      const counts = candidateSummary(candidates);
+      const rows = candidates.map((candidate) => {
+        return `${candidateType(candidate).padEnd(7)} ${candidateAddress(candidate)} ${candidate.protocol || ''} ${candidate.url || ''}`;
+      });
+      return `
+        ${status(`候选总数: ${candidates.length}`, candidates.length ? 'success' : 'warning')}<br>
+        host=${counts.host || 0}, srflx=${counts.srflx || 0}, relay=${counts.relay || 0}, unknown=${counts.unknown || 0}
+        <pre>${rows.join('\n') || '没有收集到候选'}</pre>
+        <div class="muted">host=本机/局域网，srflx=STUN 公网映射，relay=TURN 中继。跨网段最需要 srflx 或 relay。</div>
+      `;
+    }
+
+    async function testSignaling() {
+      const result = document.getElementById('signaling-result');
+      result.innerHTML = status('测试中...');
+      const rows = [];
+
+      try {
+        const health = await fetch('/health', { cache: 'no-store' });
+        rows.push(status(`/health ${health.status}`, health.ok ? 'success' : 'error'));
+      } catch (e) {
+        rows.push(status(`/health 失败: ${e.message}`, 'error'));
+      }
+
+      try {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        await new Promise((resolve, reject) => {
+          const socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+          const timer = setTimeout(() => {
+            socket.close();
+            reject(new Error('timeout'));
+          }, 3000);
+          socket.onopen = () => {
+            clearTimeout(timer);
+            socket.close();
+            resolve();
+          };
+          socket.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error('connection error'));
+          };
+        });
+        rows.push(status('/ws connected', 'success'));
+      } catch (e) {
+        rows.push(status(`/ws 失败: ${e.message}`, 'error'));
+      }
+
+      try {
+        const peerId = await fetch(`/p/peerjs/id?ts=${Date.now()}&version=1.5.2`, { cache: 'no-store' });
+        rows.push(status(`/p/peerjs/id ${peerId.status}`, peerId.ok ? 'success' : 'error'));
+      } catch (e) {
+        rows.push(status(`/p/peerjs/id 失败: ${e.message}`, 'error'));
+      }
+
+      result.innerHTML = rows.join('<br>');
+    }
+
     async function testICEServers() {
       const result = document.getElementById('ice-result');
-      result.innerHTML = '<span class="status info">测试中...</span>';
-      
+      result.innerHTML = status('测试中...');
       try {
-        const pc = new RTCPeerConnection({ iceServers });
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        
-        let candidates = [];
-        let relayFound = false;
-        
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            candidates.push(e.candidate);
-            if (e.candidate.candidate.includes('relay')) {
-              relayFound = true;
-            }
-          }
-        };
-        
-        await new Promise(resolve => {
-          pc.onicegatheringstatechange = () => {
-            if (pc.iceGatheringState === 'complete') resolve();
-          };
-          setTimeout(resolve, 5000);
-        });
-        
-        pc.close();
-        
-        result.innerHTML = `
-          <span class="status success">✓ ICE服务器可用</span>
-          <br>收集到 ${candidates.length} 个候选
-          <br>TURN中继: ${relayFound ? '✓ 可用' : '✗ 不可用'}
-        `;
+        const candidates = await collectCandidates(iceServers, 7000);
+        result.innerHTML = renderCandidates(candidates);
       } catch (e) {
-        result.innerHTML = `<span class="status error">✗ 错误: ${e.message}</span>`;
+        result.innerHTML = status(`错误: ${e.message}`, 'error');
       }
     }
-    
-    // 测试STUN
+
     async function testSTUN() {
       const result = document.getElementById('stun-result');
-      result.innerHTML = '<span class="status info">测试中...</span>';
-      
-      const stunServers = iceServers.filter(s => s.urls.includes('stun'));
+      result.innerHTML = status('测试中...');
+      const stunServers = iceServers.filter(s => String(s.urls).startsWith('stun:'));
+      const details = [];
       let successCount = 0;
-      let details = [];
-      
+
       for (const server of stunServers) {
         try {
-          const pc = new RTCPeerConnection({ iceServers: [server] });
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          
-          let hasCandidate = false;
-          pc.onicecandidate = (e) => {
-            if (e.candidate) hasCandidate = true;
-          };
-          
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          pc.close();
-          
-          if (hasCandidate) {
-            successCount++;
-            details.push(`<span class="status success">✓ ${server.urls}</span>`);
-          } else {
-            details.push(`<span class="status warning">⚠ ${server.urls} (无候选)</span>`);
-          }
+          const candidates = await collectCandidates([server], 5000);
+          const counts = candidateSummary(candidates);
+          const ok = (counts.srflx || 0) > 0;
+          if (ok) successCount++;
+          details.push(`${status(`${server.urls}: srflx=${counts.srflx || 0}, total=${candidates.length}`, ok ? 'success' : 'warning')}`);
         } catch (e) {
-          details.push(`<span class="status error">✗ ${server.urls}</span>`);
+          details.push(status(`${server.urls}: ${e.message}`, 'error'));
         }
       }
-      
-      result.innerHTML = details.join('<br>') + `<br><br>成功: ${successCount}/${stunServers.length}`;
+
+      result.innerHTML = `${details.join('<br>')}<br><br>成功: ${successCount}/${stunServers.length}`;
     }
-    
-    // 测试TURN
+
     async function testTURN() {
       const result = document.getElementById('turn-result');
-      result.innerHTML = '<span class="status info">测试中...</span>';
-      
-      const turnServers = iceServers.filter(s => s.urls.includes('turn'));
-      let details = [];
-      
+      result.innerHTML = status('测试中...');
+      const turnServers = iceServers.filter(s => String(s.urls).startsWith('turn:'));
+      const details = [];
+      let successCount = 0;
+
       for (const server of turnServers) {
         try {
-          const pc = new RTCPeerConnection({ iceServers: [server] });
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          
-          let relayFound = false;
-          pc.onicecandidate = (e) => {
-            if (e.candidate && e.candidate.candidate.includes('relay')) {
-              relayFound = true;
-            }
-          };
-          
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          pc.close();
-          
-          if (relayFound) {
-            details.push(`<span class="status success">✓ ${server.urls}</span>`);
-          } else {
-            details.push(`<span class="status warning">⚠ ${server.urls} (无中继)</span>`);
-          }
+          const candidates = await collectCandidates([server], 7000);
+          const counts = candidateSummary(candidates);
+          const ok = (counts.relay || 0) > 0;
+          if (ok) successCount++;
+          details.push(`${status(`${server.urls}: relay=${counts.relay || 0}, total=${candidates.length}`, ok ? 'success' : 'warning')}`);
         } catch (e) {
-          details.push(`<span class="status error">✗ ${server.urls}: ${e.message}</span>`);
+          details.push(status(`${server.urls}: ${e.message}`, 'error'));
         }
       }
-      
-      result.innerHTML = details.join('<br>');
+
+      result.innerHTML = `${details.join('<br>')}<br><br>成功: ${successCount}/${turnServers.length}`;
     }
-    
-    // 完整连接测试
+
     async function testFullConnection() {
       const result = document.getElementById('connection-result');
-      result.innerHTML = '<span class="status info">测试中...</span>';
-      
+      result.innerHTML = status('测试中...');
+
       try {
         const pc1 = new RTCPeerConnection({ iceServers });
         const pc2 = new RTCPeerConnection({ iceServers });
-        
         const channel = pc1.createDataChannel('test');
-        
+        const candidates = [];
         let connected = false;
-        
-        pc2.ondatachannel = (e) => {
-          e.channel.onopen = () => {
-            connected = true;
-          };
+
+        pc2.ondatachannel = (event) => {
+          event.channel.onopen = () => { connected = true; };
         };
-        
+        pc1.onicecandidate = (event) => {
+          if (event.candidate) {
+            candidates.push(event.candidate);
+            pc2.addIceCandidate(event.candidate);
+          }
+        };
+        pc2.onicecandidate = (event) => {
+          if (event.candidate) pc1.addIceCandidate(event.candidate);
+        };
+
         const offer = await pc1.createOffer();
         await pc1.setLocalDescription(offer);
         await pc2.setRemoteDescription(offer);
-        
         const answer = await pc2.createAnswer();
         await pc2.setLocalDescription(answer);
         await pc1.setRemoteDescription(answer);
-        
-        pc1.onicecandidate = (e) => {
-          if (e.candidate) pc2.addIceCandidate(e.candidate);
-        };
-        pc2.onicecandidate = (e) => {
-          if (e.candidate) pc1.addIceCandidate(e.candidate);
-        };
-        
+
         await new Promise(resolve => setTimeout(resolve, 5000));
-        
+        channel.close();
         pc1.close();
         pc2.close();
-        
-        if (connected) {
-          result.innerHTML = '<span class="status success">✓ P2P连接成功</span>';
-        } else {
-          result.innerHTML = '<span class="status warning">⚠ 连接超时，可能需要TURN服务器</span>';
-        }
+
+        result.innerHTML = connected
+          ? `${status('P2P 连接成功', 'success')}<br>${renderCandidates(candidates)}`
+          : `${status('连接超时，跨网段时通常需要可用 TURN', 'warning')}<br>${renderCandidates(candidates)}`;
       } catch (e) {
-        result.innerHTML = `<span class="status error">✗ 错误: ${e.message}</span>`;
+        result.innerHTML = status(`错误: ${e.message}`, 'error');
       }
     }
-    
-    // 网络信息
+
     async function getNetworkInfo() {
       const result = document.getElementById('network-info');
-      
+      result.innerHTML = status('测试中...');
+
       try {
-        const pc = new RTCPeerConnection({
-          iceServers: [
-            {
-              urls: 'turn:172.245.47.251:3478',
-              username: 'turnuser',
-              credential: 'r20X6AncpXA4p3f7SL'
-            },
-            { urls: 'stun:stun.l.google.com:19302' }
-          ]
-        });
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        
-        let publicIP = '未知';
-        let localIP = '未知';
-        let turnIP = '未知';
-        
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            const ip = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
-            if (ip) {
-              if (e.candidate.candidate.includes('srflx')) {
-                publicIP = ip[1];
-              } else if (e.candidate.candidate.includes('host')) {
-                localIP = ip[1];
-              } else if (e.candidate.candidate.includes('relay')) {
-                turnIP = ip[1];
-              }
-            }
-          }
-        };
-        
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        pc.close();
-        
+        const candidates = await collectCandidates(iceServers, 7000);
+        const byType = { host: [], srflx: [], relay: [], unknown: [] };
+        for (const candidate of candidates) {
+          const type = candidateType(candidate);
+          if (!byType[type]) byType[type] = [];
+          byType[type].push(candidateAddress(candidate));
+        }
+
+        const unique = (items) => [...new Set(items)].join(', ') || '未知';
         result.innerHTML = `
-          <strong>公网IP:</strong> ${publicIP}<br>
-          <strong>本地IP:</strong> ${localIP}<br>
-          <strong>TURN IP:</strong> ${turnIP}<br>
-          <strong>浏览器:</strong> ${navigator.userAgent.split(' ').pop()}
+          <strong>公网映射(srflx):</strong> ${unique(byType.srflx)}<br>
+          <strong>本地/局域网(host):</strong> ${unique(byType.host)}<br>
+          <strong>TURN 中继(relay):</strong> ${unique(byType.relay)}<br>
+          <strong>浏览器:</strong> ${navigator.userAgent}<br>
+          <br>${renderCandidates(candidates)}
         `;
       } catch (e) {
-        result.innerHTML = `<span class="status error">获取失败: ${e.message}</span>`;
+        result.innerHTML = status(`获取失败: ${e.message}`, 'error');
       }
     }
-    
+
     getNetworkInfo();
   </script>
 </body>

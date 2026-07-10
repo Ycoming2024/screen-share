@@ -258,8 +258,11 @@ header {
 
 #remote-video {
   width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
   display: block;
   cursor: pointer;
+  object-fit: contain;
 }
 
 #video-controls {

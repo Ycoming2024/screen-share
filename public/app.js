@@ -1,10 +1,12 @@
 // 版本号
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 const ROOM_WS_PATH = '/ws';
 const PEER_PATH = '/p';
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:openrelay.metered.ca:80' },
   {
     urls: 'turn:172.245.47.251:3478?transport=udp',
     username: 'turnuser',
@@ -153,14 +155,60 @@ function initPeer() {
 }
 
 // 处理呼叫
+function playRemoteVideo() {
+  remoteVideo.autoplay = true;
+  remoteVideo.muted = true;
+  remoteVideo.playsInline = true;
+
+  const playPromise = remoteVideo.play();
+  if (playPromise && typeof playPromise.catch === 'function') {
+    playPromise.catch((err) => {
+      console.warn('Remote video autoplay blocked:', err);
+      videoStatus.textContent = '视频已连接，点击黑色画面播放';
+    });
+  }
+}
+
+function describeRemoteStream(remoteStream) {
+  const videoTracks = remoteStream.getVideoTracks();
+  const audioTracks = remoteStream.getAudioTracks();
+  const videoTrack = videoTracks[0];
+
+  if (videoTrack) {
+    videoTrack.onmute = () => {
+      videoStatus.textContent = '视频轨道暂时无画面，可能正在切换窗口或被系统保护';
+    };
+    videoTrack.onunmute = () => {
+      videoStatus.textContent = '正在观看共享屏幕';
+      playRemoteVideo();
+    };
+    videoTrack.onended = () => {
+      videoStatus.textContent = '共享视频轨道已结束';
+    };
+  }
+
+  console.log('Remote stream tracks:', {
+    video: videoTracks.length,
+    audio: audioTracks.length,
+    videoState: videoTrack ? videoTrack.readyState : 'none',
+    videoMuted: videoTrack ? videoTrack.muted : null
+  });
+}
+
 function handleCall(call) {
   currentCall = call;
   
   call.on('stream', (remoteStream) => {
     console.log('收到远程流，轨道数:', remoteStream.getTracks().length);
     if (remoteStream.getTracks().length > 0) {
+      describeRemoteStream(remoteStream);
       remoteVideo.srcObject = remoteStream;
+      remoteVideo.onloadedmetadata = () => {
+        videoStatus.textContent = `正在观看共享屏幕 ${remoteVideo.videoWidth || 0}x${remoteVideo.videoHeight || 0}`;
+        playRemoteVideo();
+      };
       videoContainer.classList.remove('hidden');
+      playRemoteVideo();
       videoStatus.textContent = '正在观看共享屏幕';
     }
   });
